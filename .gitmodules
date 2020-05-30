@@ -1,0 +1,3 @@
+[submodule "newhope"]
+	path = newhope
+	url = https://github.com/newhopecrypto/newhope

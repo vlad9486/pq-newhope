@@ -1,0 +1,12 @@
+[package]
+name = "pq-newhope"
+version = "0.1.0"
+authors = ["Vladislav Melnik <vladislav.melnik@protonmail.com>"]
+edition = "2018"
+
+[build-dependencies]
+cc = "1.0"
+
+[dependencies]
+rand = "0.7"
+hex = "0.4"
