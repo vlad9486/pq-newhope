@@ -1,5 +1,5 @@
+pub use crate::{PublicKey, SecretKey};
 use super::sizes::{Base512, Base1024, Cpakem, Ccakem, NewHopeSize};
-pub use super::sizes::{PublicKey, SecretKey};
 
 use core::fmt;
 

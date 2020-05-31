@@ -1,8 +1,5 @@
-#[rustfmt::skip]
-use super::{
-    PublicKeyCpakem512, PublicKeyCpakem1024, PublicKeyCcakem512, PublicKeyCcakem1024,
-    SecretKey, PublicKey,
-};
+use crate::wrapper::{PublicKeyCpakem512, PublicKeyCpakem1024, PublicKeyCcakem512, PublicKeyCcakem1024};
+use crate::{PublicKey, SecretKey};
 
 #[test]
 fn cpakem512() {
