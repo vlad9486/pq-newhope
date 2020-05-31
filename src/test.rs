@@ -1,54 +1,34 @@
 use crate::wrapper::{PublicKeyCpakem512, PublicKeyCpakem1024, PublicKeyCcakem512, PublicKeyCcakem1024};
 use crate::{PublicKey, SecretKey};
+use core::fmt;
+
+fn generic_test<P>()
+where
+    P: PublicKey,
+    P::SharedSecret: PartialEq + fmt::Debug,
+{
+    let (pk_a, sk_a) = P::pair();
+    let (ct, key_b) = pk_a.encrypt();
+    let key_a = sk_a.decrypt(&ct);
+    assert_eq!(key_a, key_b);
+}
 
 #[test]
 fn cpakem512() {
-    let (pk, sk) = PublicKeyCpakem512::pair();
-    let (ct, ss) = pk.encrypt();
-    let ss_ = sk.decrypt(&ct);
-    println!(
-        "{}\n{}",
-        hex::encode(ss.as_ref()),
-        hex::encode(ss_.as_ref())
-    );
-    assert_eq!(ss_, ss);
+    generic_test::<PublicKeyCpakem512>()
 }
 
 #[test]
 fn cpakem1024() {
-    let (pk, sk) = PublicKeyCpakem1024::pair();
-    let (ct, ss) = pk.encrypt();
-    let ss_ = sk.decrypt(&ct);
-    println!(
-        "{}\n{}",
-        hex::encode(ss.as_ref()),
-        hex::encode(ss_.as_ref())
-    );
-    assert_eq!(ss_, ss);
+    generic_test::<PublicKeyCpakem1024>()
 }
 
 #[test]
 fn ccakem512() {
-    let (pk, sk) = PublicKeyCcakem512::pair();
-    let (ct, ss) = pk.encrypt();
-    let ss_ = sk.decrypt(&ct);
-    println!(
-        "{}\n{}",
-        hex::encode(ss.as_ref()),
-        hex::encode(ss_.as_ref())
-    );
-    assert_eq!(ss_, ss);
+    generic_test::<PublicKeyCcakem512>()
 }
 
 #[test]
 fn ccakem1024() {
-    let (pk, sk) = PublicKeyCcakem1024::pair();
-    let (ct, ss) = pk.encrypt();
-    let ss_ = sk.decrypt(&ct);
-    println!(
-        "{}\n{}",
-        hex::encode(ss.as_ref()),
-        hex::encode(ss_.as_ref())
-    );
-    assert_eq!(ss_, ss);
+    generic_test::<PublicKeyCcakem1024>()
 }
