@@ -11,73 +11,99 @@ mod sys;
 mod sizes;
 
 use self::sizes::{Base512, Base1024, Cpakem, Ccakem, NewHopeSize};
+pub use self::sizes::{PublicKey, SecretKey};
 
 use core::fmt;
 
+macro_rules! a {
+    ($t:ident, $length:expr) => {
+        #[derive(Clone)]
+        pub struct $t {
+            raw: [u8; $length],
+        }
+
+        impl AsRef<[u8]> for $t {
+            fn as_ref(&self) -> &[u8] {
+                &self.raw
+            }
+        }
+
+        impl fmt::Display for $t {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "{}", hex::encode(self.as_ref()))
+            }
+        }
+
+        impl fmt::Debug for $t {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.debug_tuple(stringify!($t))
+                    .field(&hex::encode(self.as_ref()))
+                    .finish()
+            }
+        }
+
+        impl $t {
+            fn zero() -> Self {
+                $t {
+                    raw: [0; $length],
+                }
+            }
+
+            #[allow(dead_code)]
+            fn as_ptr(&self) -> *const u8 {
+                self.raw.as_ptr()
+            }
+
+            fn as_mut_ptr(&mut self) -> *mut u8 {
+                self.raw.as_mut_ptr()
+            }
+        }
+
+        impl PartialEq for $t {
+            fn eq(&self, other: &Self) -> bool {
+                self.raw.iter().zip(other.raw.iter()).fold(true, |acc, (&l, &r)| acc && (l == r))
+            }
+        }
+    }
+}
+
 macro_rules! i {
-    ($s:ty, $pk:ident, $sk:ident, $keypair:path, $encrypt:path, $decrypt:path) => {
-        #[derive(Clone)]
-        pub struct $pk {
-            raw: [u8; <$s as NewHopeSize>::PUBLIC_KEY],
-        }
+    ($s:ty, $pk:ident, $sk:ident, $ct:ident, $ss:ident, $keypair:path, $encrypt:path, $decrypt:path) => {
+        a!($pk, <$s as NewHopeSize>::PUBLIC_KEY);
+        a!($sk, <$s as NewHopeSize>::SECRET_KEY);
+        a!($ct, <$s as NewHopeSize>::CIPHER_TEXT);
+        a!($ss, <$s as NewHopeSize>::SHARED_SECRET);
 
-        impl fmt::Display for $pk {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(f, "{}", hex::encode(self.raw.as_ref()))
-            }
-        }
+        impl PublicKey for $pk {
+            type CipherText = $ct;
+            type SharedSecret = $ss;
+            type SecretKey = $sk;
 
-        #[derive(Clone)]
-        pub struct $sk {
-            raw: [u8; <$s as NewHopeSize>::SECRET_KEY],
-        }
+            fn pair() -> (Self, $sk) {
+                let mut pk = $pk::zero();
+                let mut sk = $sk::zero();
 
-        impl fmt::Display for $sk {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                write!(f, "{}", hex::encode(self.raw.as_ref()))
-            }
-        }
-
-        impl $pk {
-            pub fn new() -> (Self, $sk) {
-                let mut pk = [0; <$s as NewHopeSize>::PUBLIC_KEY];
-                let mut sk = [0; <$s as NewHopeSize>::SECRET_KEY];
-
-                unsafe {
-                    $keypair(pk.as_mut_ptr(), sk.as_mut_ptr());
-                }
-
-                ($pk { raw: pk }, $sk { raw: sk })
+                unsafe { $keypair(pk.as_mut_ptr(), sk.as_mut_ptr()); }
+                (pk, sk)
             }
 
-            pub fn encrypt(
-                &self,
-            ) -> (
-                [u8; <$s as NewHopeSize>::CIPHER_TEXT],
-                [u8; <$s as NewHopeSize>::SHARED_SECRET],
-            ) {
-                let mut ct = [0; <$s as NewHopeSize>::CIPHER_TEXT];
-                let mut ss = [0; <$s as NewHopeSize>::SHARED_SECRET];
+            fn encrypt(&self) -> (Self::CipherText, Self::SharedSecret) {
+                let mut ct = $ct::zero();
+                let mut ss = $ss::zero();
 
-                unsafe {
-                    $encrypt(ct.as_mut_ptr(), ss.as_mut_ptr(), self.raw.as_ptr());
-                }
-
+                unsafe { $encrypt(ct.as_mut_ptr(), ss.as_mut_ptr(), self.as_ptr()); }
                 (ct, ss)
             }
         }
 
-        impl $sk {
-            pub fn decrypt(
-                &self,
-                cipher_text: &[u8; <$s as NewHopeSize>::CIPHER_TEXT],
-            ) -> [u8; <$s as NewHopeSize>::SHARED_SECRET] {
-                let mut ss = [0; <$s as NewHopeSize>::SHARED_SECRET];
+        impl SecretKey for $sk {
+            type CipherText = $ct;
+            type SharedSecret = $ss;
 
-                unsafe {
-                    $decrypt(ss.as_mut_ptr(), cipher_text.as_ptr(), self.raw.as_ptr());
-                }
+            fn decrypt(&self, cipher_text: &Self::CipherText) -> Self::SharedSecret {
+                let mut ss = $ss::zero();
 
+                unsafe { $decrypt(ss.as_mut_ptr(), cipher_text.as_ptr(), self.as_ptr()); }
                 ss
             }
         }
@@ -88,6 +114,8 @@ i!(
     Cpakem::<Base512>,
     PublicKeyCpakem512,
     SecretKeyCpakem512,
+    CipherTextCpakem512,
+    SharedSecretCpakem512,
     self::sys::p512_crypto_kem_keypair,
     self::sys::p512_crypto_kem_enc,
     self::sys::p512_crypto_kem_dec
@@ -97,6 +125,8 @@ i!(
     Cpakem::<Base1024>,
     PublicKeyCpakem1024,
     SecretKeyCpakem1024,
+    CipherTextCpakem1024,
+    SharedSecretCpakem1024,
     self::sys::p1024_crypto_kem_keypair,
     self::sys::p1024_crypto_kem_enc,
     self::sys::p1024_crypto_kem_dec
@@ -106,6 +136,8 @@ i!(
     Ccakem::<Base512>,
     PublicKeyCcakem512,
     SecretKeyCcakem512,
+    CipherTextCcakem512,
+    SharedSecretCcakem512,
     self::sys::c512_crypto_kem_keypair,
     self::sys::c512_crypto_kem_enc,
     self::sys::c512_crypto_kem_dec
@@ -115,6 +147,8 @@ i!(
     Ccakem::<Base1024>,
     PublicKeyCcakem1024,
     SecretKeyCcakem1024,
+    CipherTextCcakem1024,
+    SharedSecretCcakem1024,
     self::sys::c1024_crypto_kem_keypair,
     self::sys::c1024_crypto_kem_enc,
     self::sys::c1024_crypto_kem_dec
