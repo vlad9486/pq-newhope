@@ -10,3 +10,5 @@ cc = "1.0"
 [dependencies]
 rand = "0.7"
 hex = "0.4"
+generic-array = "0.14"
+sha3 = "0.8"

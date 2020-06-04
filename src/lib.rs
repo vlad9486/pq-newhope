@@ -9,5 +9,6 @@ mod test;
 
 mod traits;
 pub mod wrapper;
+pub mod pure;
 
 pub use self::traits::{PublicKey, SecretKey};
