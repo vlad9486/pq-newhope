@@ -7,9 +7,9 @@ where
     P: PublicKey,
     P::SharedSecret: PartialEq + fmt::Debug,
 {
-    let (pk_a, sk_a) = P::pair();
-    let (ct, key_b) = pk_a.encrypt();
-    let key_a = sk_a.decrypt(&ct);
+    let (pk_a, sk_a) = P::generate();
+    let (ct, key_b) = pk_a.encapsulate();
+    let key_a = sk_a.decapsulate(&ct);
     assert_eq!(key_a, key_b);
 }
 

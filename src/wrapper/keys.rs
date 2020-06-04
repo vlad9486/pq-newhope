@@ -68,7 +68,7 @@ macro_rules! i {
             type SharedSecret = $ss;
             type SecretKey = $sk;
 
-            fn pair() -> (Self, $sk) {
+            fn generate() -> (Self, $sk) {
                 let mut pk = $pk::zero();
                 let mut sk = $sk::zero();
 
@@ -78,7 +78,7 @@ macro_rules! i {
                 (pk, sk)
             }
 
-            fn encrypt(&self) -> (Self::CipherText, Self::SharedSecret) {
+            fn encapsulate(&self) -> (Self::CipherText, Self::SharedSecret) {
                 let mut ct = $ct::zero();
                 let mut ss = $ss::zero();
 
@@ -93,7 +93,7 @@ macro_rules! i {
             type CipherText = $ct;
             type SharedSecret = $ss;
 
-            fn decrypt(&self, cipher_text: &Self::CipherText) -> Self::SharedSecret {
+            fn decapsulate(&self, cipher_text: &Self::CipherText) -> Self::SharedSecret {
                 let mut ss = $ss::zero();
 
                 unsafe {
