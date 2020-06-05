@@ -44,12 +44,6 @@ where
     pub fn from_bytes(bytes: &GenericArray<u8, <N as Mul<U14>>::Output>) -> Self {
         assert!((N::USIZE & (N::USIZE - 1)) == 0, "should be power of two");
 
-        assert!(
-            N::USIZE * 8 < Self::BLOCK_SIZE * 256,
-            "block has {} coefficients, index of the block should fit in byte",
-            Self::BLOCK_SIZE,
-        );
-
         let mut c = GenericArray::default();
         for i in 0..(N::USIZE * 2) {
             let a = |j| bytes[7 * i + j] as u16;
@@ -71,19 +65,19 @@ where
         let mut a = GenericArray::default();
 
         for i in 0..(N::USIZE * 2) {
-            // memorize?
-            let t = |j: usize| -> u16 {
-                let c: &Coefficient = &self.coefficients[4 * i + j];
-                c.freeze() as u16
-            };
+            let mut t = [0; 4];
+            for j in 0..4 {
+                t[j] = self.coefficients[4 * i + j].freeze() as u16;
+            }
+
             let r = &mut a[(7 * i)..(7 * (i + 1))];
-            r[0] = (t(0) & 0x00ff) as u8;
-            r[1] = ((t(0) >> 0x8) | (t(1) << 0x6)) as u8;
-            r[2] = (t(1) >> 0x2) as u8;
-            r[3] = ((t(1) >> 0xa) | (t(2) << 0x4)) as u8;
-            r[4] = (t(2) >> 0x4) as u8;
-            r[5] = ((t(2) >> 0xc) | (t(3) << 0x2)) as u8;
-            r[6] = (t(3) >> 0x6) as u8;
+            r[0] = (t[0] & 0x00ff) as u8;
+            r[1] = ((t[0] >> 0x8) | (t[1] << 0x6)) as u8;
+            r[2] = (t[1] >> 0x2) as u8;
+            r[3] = ((t[1] >> 0xa) | (t[2] << 0x4)) as u8;
+            r[4] = (t[2] >> 0x4) as u8;
+            r[5] = ((t[2] >> 0xc) | (t[3] << 0x2)) as u8;
+            r[6] = (t[3] >> 0x6) as u8;
         }
 
         a
@@ -93,17 +87,14 @@ where
         let mut a = GenericArray::default();
 
         for i in 0..N::USIZE {
-            // memorize?
-            let t = |j: usize| -> u8 {
-                let c: &Coefficient = &self.coefficients[8 * i + j];
-                let x = c.freeze() as u32;
-                let x = ((x << 3) + ((Coefficient::Q / 2) as u32)) / (Coefficient::Q as u32);
-                (x & 0x07) as u8
-            };
+            let mut t = [0; 8];
+            for j in 0..8 {
+                t[j] = self.coefficients[8 * i + j].compress()
+            }
 
-            a[3 * i + 0] = (t(0) >> 0x0) | (t(1) << 0x3) | (t(2) << 0x6);
-            a[3 * i + 1] = (t(2) >> 0x2) | (t(3) << 0x1) | (t(4) << 0x4) | (t(5) << 0x7);
-            a[3 * i + 2] = (t(5) >> 0x1) | (t(6) << 0x2) | (t(7) << 0x5);
+            a[3 * i + 0] = (t[0] >> 0x0) | (t[1] << 0x3) | (t[2] << 0x6);
+            a[3 * i + 1] = (t[2] >> 0x2) | (t[3] << 0x1) | (t[4] << 0x4) | (t[5] << 0x7);
+            a[3 * i + 2] = (t[5] >> 0x1) | (t[6] << 0x2) | (t[7] << 0x5);
         }
 
         PolyCompressed {
@@ -128,7 +119,7 @@ where
                 (a[2] >> 0x5),
             ];
             for j in 0..8 {
-                c[8 * i + j] = Coefficient::new((((t[j] as u32) * (Coefficient::Q as u32) + 4) >> 3) as u16);
+                c[8 * i + j] = Coefficient::decompress(t[j]);
             }
         }
 
@@ -144,7 +135,7 @@ where
         for i in 0..(N::USIZE * 8) {
             let l = i % 256;
             if (message.0[l / 8] & (1 << (l % 8))) != 0 {
-                c[i] = Coefficient::new(Coefficient::Q / 2);
+                c[i] = Coefficient::MIDDLE;
             }
         }
 
@@ -155,15 +146,17 @@ where
     }
 
     pub fn to_message(&self) -> Message {
-        let mut t = [0; 256];
+        const BITS: usize = 256;
+        let coeffitients = N::USIZE * 8;
+        let mut t = [0; BITS];
         let mut message = Message::default();
 
-        for i in 0..(N::USIZE * 8) {
-            t[i % 256] += self.coefficients[i].flip_abs() as u32;
+        for i in 0..coeffitients {
+            t[i % BITS] += self.coefficients[i].flip_abs() as u32;
         }
 
-        for l in 0..256 {
-            if t[l] < (((Coefficient::Q as usize) * N::USIZE / 128) as u32) {
+        for l in 0..BITS {
+            if t[l] < (Coefficient::QUARTER.data() * (coeffitients as u32) / (BITS as u32)) {
                 message.0[l / 8] |= 1 << (l % 8);
             }
         }
@@ -177,6 +170,12 @@ where
             digest::{Input, ExtendableOutput, XofReader},
         };
 
+        assert!(
+            N::USIZE * 8 < Self::BLOCK_SIZE * 256,
+            "block has {} coefficients, index of the block should fit in byte",
+            Self::BLOCK_SIZE,
+        );
+
         let mut c = GenericArray::default();
 
         let mut ext_seed = [0; 33];
@@ -189,11 +188,14 @@ where
                 let mut buffer = [0; 168];
                 h.read(buffer.as_mut());
                 for chunk in buffer.chunks(2) {
-                    let coefficient = (chunk[0] as u16) | ((chunk[1] as u16) << 8);
-                    if coefficient < (core::u16::MAX / Coefficient::Q) * Coefficient::Q {
-                        c[Self::BLOCK_SIZE * i + counter] = Coefficient::new(coefficient);
-                        counter += 1;
-                    }
+                    let r = (chunk[0] as u16) | ((chunk[1] as u16) << 8);
+                    match Coefficient::try_new(r) {
+                        Some(t) => {
+                            c[Self::BLOCK_SIZE * i + counter] = t;
+                            counter += 1;
+                        },
+                        None => (),
+                    };
                     if counter == Self::BLOCK_SIZE {
                         break 'block;
                     }
@@ -223,14 +225,13 @@ where
             ext_seed[33] = i as u8;
 
             // Compute the Hamming weight of a byte
-            let hw = |b: u8| -> u16 { (0..8).map(|i| ((b >> i) & 1) as u16).sum() };
+            let hw = |b: u8| -> i8 { (0..8).map(|i| ((b >> i) & 1) as i8).sum() };
 
             let mut h = Shake256::default().chain(ext_seed.as_ref()).xof_result();
             let mut buffer = [0; Self::BLOCK_SIZE * 2];
             h.read(buffer.as_mut());
             for j in 0..Self::BLOCK_SIZE {
-                let r = hw(buffer[2 * j]) + Coefficient::Q - hw(buffer[2 * j + 1]);
-                c[Self::BLOCK_SIZE * i + j] = Coefficient::new(r);
+                c[Self::BLOCK_SIZE * i + j] = Coefficient::small(hw(buffer[2 * j]) - hw(buffer[2 * j + 1]));
             }
         }
 

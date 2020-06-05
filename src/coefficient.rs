@@ -7,9 +7,13 @@ use core::{
 pub struct Coefficient(u16);
 
 impl Coefficient {
-    pub const Q: u16 = 12289;
+    const Q: u16 = 12289;
     const Q_INV: u16 = 12287;
     const R_LOG: u32 = 18;
+
+    pub const MIDDLE: Self = Coefficient(Self::Q / 2);
+
+    pub const QUARTER: Self = Coefficient(Self::Q / 4);
 
     pub fn freeze(&self) -> i16 {
         let r = (self.0 % Self::Q) as i16;
@@ -22,6 +26,18 @@ impl Coefficient {
         Coefficient(r)
     }
 
+    pub fn try_new(r: u16) -> Option<Self> {
+        if r < (core::u16::MAX / Self::Q) * Self::Q {
+            Some(Self::new(r))
+        } else {
+            None
+        }
+    }
+
+    pub fn small(s: i8) -> Self {
+        Self::new(((Self::Q as i16) + (s as i16)) as u16)
+    }
+
     pub fn flip_abs(&self) -> u16 {
         let r = self.freeze() - ((Self::Q / 2) as i16);
         let m = r >> 15;
@@ -31,7 +47,17 @@ impl Coefficient {
     pub fn montgomery_reduce(x: u32) -> Self {
         let Wrapping(u) = Wrapping(x) * Wrapping(Self::Q_INV as u32);
         let u = (u & ((1 << Self::R_LOG) - 1)) * (Self::Q as u32);
-        Coefficient::new(((x + u) >> Self::R_LOG) as u16)
+        Self::new(((x + u) >> Self::R_LOG) as u16)
+    }
+
+    pub fn compress(&self) -> u8 {
+        let x = self.freeze() as u32;
+        let x = ((x << 3) + ((Self::Q / 2) as u32)) / (Self::Q as u32);
+        (x & 0x07) as u8
+    }
+
+    pub fn decompress(t: u8) -> Self {
+        Self::new((((t as u32) * (Self::Q as u32) + 4) >> 3) as u16)
     }
 
     pub fn data(&self) -> u32 {
