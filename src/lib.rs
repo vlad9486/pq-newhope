@@ -4,11 +4,9 @@
 #[macro_use]
 extern crate std;
 
+mod traits;
+pub use self::traits::{PublicKey, SecretKey};
+
+pub mod pure;
 #[cfg(test)]
 mod test;
-
-mod traits;
-pub mod wrapper;
-pub mod pure;
-
-pub use self::traits::{PublicKey, SecretKey};
