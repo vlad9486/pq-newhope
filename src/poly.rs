@@ -5,7 +5,7 @@ use core::{
 };
 use generic_array::{
     GenericArray, ArrayLength,
-    typenum::{Unsigned, U8, U14, U3, Bit, B1, U1024},
+    typenum::{Unsigned, U8, U14, U3, Bit, B1, U128},
 };
 
 pub trait Packable {
@@ -387,7 +387,7 @@ pub trait Ntt {
     fn inv_ntt(self) -> Self::Output;
 }
 
-impl<R> Poly<U1024, R>
+impl<R> Poly<U128, R>
 where
     R: Bit + BitXor<B1>,
     <R as BitXor<B1>>::Output: Bit + BitXor<B1, Output = R>,
@@ -403,7 +403,7 @@ where
         s
     }
 
-    fn transform(self, omegas: &[u16]) -> Poly<U1024, <R as BitXor<B1>>::Output> {
+    fn transform(self, omegas: &[u16]) -> Poly<U128, <R as BitXor<B1>>::Output> {
         let mut s = Poly {
             coefficients: self.coefficients,
             phantom_data: PhantomData,
@@ -434,13 +434,13 @@ where
     }
 }
 
-impl<R> Ntt for Poly<U1024, R>
+impl<R> Ntt for Poly<U128, R>
 where
     Coefficient: Default + Clone,
     R: Bit + BitXor<B1>,
     <R as BitXor<B1>>::Output: Bit + BitXor<B1, Output = R>,
 {
-    type Output = Poly<U1024, <R as BitXor<B1>>::Output>;
+    type Output = Poly<U128, <R as BitXor<B1>>::Output>;
 
     fn reverse_bits(self) -> Self::Output {
         let mut s = Poly {
