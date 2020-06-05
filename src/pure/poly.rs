@@ -1,184 +1,40 @@
+use super::{
+    message::Message,
+    coefficient::Coefficient,
+};
+use core::{
+    marker::PhantomData,
+    ops::{Mul, Div, Add, Sub, BitXor},
+};
 use generic_array::{
     GenericArray, ArrayLength,
     typenum::{U8, U14, U3, Bit, B1, U1024},
 };
-use core::{
-    num::Wrapping,
-    marker::PhantomData,
-    ops::{Mul, Div, Add, Sub, BitXor},
-    fmt,
-};
 
-pub trait Params {
-    const Q: u16;
-    const Q_INV: u16;
-    const R_LOG: u32;
-}
-
-#[derive(Default, Clone)]
-pub struct DefaultParams;
-
-impl Params for DefaultParams {
-    const Q: u16 = 12289;
-    const Q_INV: u16 = 12287;
-    const R_LOG: u32 = 18;
-}
-
-#[derive(Clone, Default)]
-pub struct Coefficient<P>
+pub struct Poly<N, R>
 where
-    P: Params,
-{
-    data: u16,
-    phantom_data: PhantomData<P>,
-}
-
-impl<P> Coefficient<P>
-where
-    P: Params,
-{
-    pub fn freeze(&self) -> i16 {
-        let r = (self.data % P::Q) as i16;
-        let m = r - P::Q as i16;
-        let c = m >> 15;
-        m ^ ((r ^ m) & c)
-    }
-
-    pub fn new(r: u16) -> Self {
-        Coefficient {
-            data: r,
-            phantom_data: PhantomData,
-        }
-    }
-
-    pub fn flip_abs(&self) -> u16 {
-        let r = self.freeze() - ((P::Q / 2) as i16);
-        let m = r >> 15;
-        ((r + m) ^ m) as u16
-    }
-
-    pub fn montgomery_reduce(x: u32) -> Self {
-        let Wrapping(u) = Wrapping(x) * Wrapping(P::Q_INV as u32);
-        let u = (u & ((1 << P::R_LOG) - 1)) * (P::Q as u32);
-        Coefficient::new(((x + u) >> P::R_LOG) as u16)
-    }
-
-    pub fn data(&self) -> u32 {
-        self.data as u32
-    }
-}
-
-impl<'a, 'b, P> Add<&'b Coefficient<P>> for &'a Coefficient<P>
-where
-    P: Params,
-{
-    type Output = Coefficient<P>;
-
-    fn add(self, other: &'b Coefficient<P>) -> Self::Output {
-        Coefficient::new((self.data + other.data) % P::Q)
-    }
-}
-
-impl<'a, 'b, P> Sub<&'b Coefficient<P>> for &'a Coefficient<P>
-where
-    P: Params,
-{
-    type Output = Coefficient<P>;
-
-    fn sub(self, other: &'b Coefficient<P>) -> Self::Output {
-        Coefficient::new((self.data + 3 * P::Q - other.data) % P::Q)
-    }
-}
-
-impl<'a, 'b, P> Mul<&'b Coefficient<P>> for &'a Coefficient<P>
-where
-    P: Params,
-{
-    type Output = Coefficient<P>;
-
-    fn mul(self, other: &'b Coefficient<P>) -> Self::Output {
-        let t = Coefficient::<P>::montgomery_reduce(3186 * other.data());
-        Coefficient::montgomery_reduce(t.data() * self.data())
-    }
-}
-
-#[derive(Default, Eq, PartialEq)]
-pub struct Message(pub [u8; 32]);
-
-impl Message {
-    pub fn expand(self, nonce: u8) -> (Message, Message) {
-        use sha3::{
-            Shake256,
-            digest::{Input, ExtendableOutput, XofReader},
-        };
-
-        let mut ext_seed = [0; 33];
-        ext_seed[0] = nonce;
-        ext_seed[1..33].clone_from_slice(self.0.as_ref());
-        let mut h = Shake256::default().chain(ext_seed.as_ref()).xof_result();
-        let mut buffer = [0; 64];
-        h.read(&mut buffer);
-        let mut public_seed = Message::default();
-        public_seed.0.as_mut().clone_from_slice(&buffer[0..32]);
-        let mut noise_seed = Message::default();
-        noise_seed.0.as_mut().clone_from_slice(&buffer[32..]);
-        (public_seed, noise_seed)
-    }
-
-    pub fn hash(self) -> Message {
-        use sha3::{
-            Shake256,
-            digest::{Input, ExtendableOutput, XofReader},
-        };
-
-        let mut h = Shake256::default().chain(self.0.as_ref()).xof_result();
-        let mut buffer = [0; 32];
-        h.read(&mut buffer);
-        Message(buffer)
-    }
-}
-
-impl fmt::Display for Message {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", hex::encode(self.0))
-    }
-}
-
-impl fmt::Debug for Message {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("Message")
-            .field(&hex::encode(self.0))
-            .finish()
-    }
-}
-
-pub struct Poly<P, N, R>
-where
-    P: Params,
-    N: ArrayLength<Coefficient<P>>,
+    N: ArrayLength<Coefficient>,
     R: Bit,
 {
-    coefficients: GenericArray<Coefficient<P>, N>,
+    coefficients: GenericArray<Coefficient, N>,
     phantom_data: PhantomData<R>,
 }
 
-pub struct PolyCompressed<P, N, R>
+pub struct PolyCompressed<N, R>
 where
-    P: Params,
     N: Div<U8>,
     <N as Div<U8>>::Output: Mul<U3>,
     <<N as Div<U8>>::Output as Mul<U3>>::Output: ArrayLength<u8>,
     R: Bit,
 {
     coefficients: GenericArray<u8, <<N as Div<U8>>::Output as Mul<U3>>::Output>,
-    phantom_data: PhantomData<(P, R)>,
+    phantom_data: PhantomData<R>,
 }
 
-impl<P, N, R> Poly<P, N, R>
+impl<N, R> Poly<N, R>
 where
-    P: Params,
-    Coefficient<P>: Default,
-    N: ArrayLength<Coefficient<P>> + Div<U8>,
+    Coefficient: Default,
+    N: ArrayLength<Coefficient> + Div<U8>,
     <N as Div<U8>>::Output: Mul<U14> + Mul<U3>,
     <<N as Div<U8>>::Output as Mul<U14>>::Output: ArrayLength<u8>,
     <<N as Div<U8>>::Output as Mul<U3>>::Output: ArrayLength<u8>,
@@ -186,7 +42,7 @@ where
 {
     const BLOCK_SIZE: usize = 1 << 6;
 
-    pub fn new(bytes: &GenericArray<u8, <<N as Div<U8>>::Output as Mul<U14>>::Output>) -> Self {
+    pub fn from_bytes(bytes: &GenericArray<u8, <<N as Div<U8>>::Output as Mul<U14>>::Output>) -> Self {
         assert!((N::USIZE & (N::USIZE - 1)) == 0, "should be power of two");
 
         assert!(
@@ -218,7 +74,7 @@ where
         for i in 0..(N::USIZE / 4) {
             // memorize?
             let t = |j: usize| -> u16 {
-                let c: &Coefficient<P> = &self.coefficients[4 * i + j];
+                let c: &Coefficient = &self.coefficients[4 * i + j];
                 c.freeze() as u16
             };
             let r = &mut a[(7 * i)..(7 * (i + 1))];
@@ -234,15 +90,15 @@ where
         a
     }
 
-    pub fn compress(&self) -> PolyCompressed<P, N, R> {
+    pub fn compress(&self) -> PolyCompressed<N, R> {
         let mut a = GenericArray::default();
 
         for i in 0..(N::USIZE / 8) {
             // memorize?
             let t = |j: usize| -> u8 {
-                let c: &Coefficient<P> = &self.coefficients[8 * i + j];
+                let c: &Coefficient = &self.coefficients[8 * i + j];
                 let x = c.freeze() as u32;
-                let x = ((x << 3) + ((P::Q / 2) as u32)) / (P::Q as u32);
+                let x = ((x << 3) + ((Coefficient::Q / 2) as u32)) / (Coefficient::Q as u32);
                 (x & 0x07) as u8
             };
 
@@ -257,7 +113,7 @@ where
         }
     }
 
-    pub fn decompress(p: &PolyCompressed<P, N, R>) -> Self {
+    pub fn decompress(p: &PolyCompressed<N, R>) -> Self {
         let mut c = GenericArray::default();
 
         for i in 0..(N::USIZE / 8) {
@@ -273,7 +129,7 @@ where
                 (a[2] >> 0x5),
             ];
             for j in 0..8 {
-                c[8 * i + j] = Coefficient::new((((t[j] as u32) * (P::Q as u32) + 4) >> 3) as u16);
+                c[8 * i + j] = Coefficient::new((((t[j] as u32) * (Coefficient::Q as u32) + 4) >> 3) as u16);
             }
         }
 
@@ -289,7 +145,7 @@ where
         for i in 0..N::USIZE {
             let l = i % 256;
             if (message.0[l / 8] & (1 << (l % 8))) != 0 {
-                c[i] = Coefficient::new(P::Q / 2);
+                c[i] = Coefficient::new(Coefficient::Q / 2);
             }
         }
 
@@ -308,7 +164,7 @@ where
         }
 
         for l in 0..256 {
-            if t[l] < (((P::Q as usize) * N::USIZE / 1024) as u32) {
+            if t[l] < (((Coefficient::Q as usize) * N::USIZE / 1024) as u32) {
                 message.0[l / 8] |= 1 << (l % 8);
             }
         }
@@ -335,7 +191,7 @@ where
                 h.read(buffer.as_mut());
                 for chunk in buffer.chunks(2) {
                     let coefficient = (chunk[0] as u16) | ((chunk[1] as u16) << 8);
-                    if coefficient < 5 * P::Q {
+                    if coefficient < (core::u16::MAX / Coefficient::Q) * Coefficient::Q {
                         c[Self::BLOCK_SIZE * i + counter] = Coefficient::new(coefficient);
                         counter += 1;
                     }
@@ -374,7 +230,7 @@ where
             let mut buffer = [0; Self::BLOCK_SIZE * 2];
             h.read(buffer.as_mut());
             for j in 0..Self::BLOCK_SIZE {
-                let r = hw(buffer[2 * j]) + P::Q - hw(buffer[2 * j + 1]);
+                let r = hw(buffer[2 * j]) + Coefficient::Q - hw(buffer[2 * j + 1]);
                 c[Self::BLOCK_SIZE * i + j] = Coefficient::new(r);
             }
         }
@@ -386,16 +242,15 @@ where
     }
 }
 
-impl<'a, 'b, P, N, R> Add<&'b Poly<P, N, R>> for &'a Poly<P, N, R>
+impl<'a, 'b, N, R> Add<&'b Poly<N, R>> for &'a Poly<N, R>
 where
-    P: Params,
-    Coefficient<P>: Default,
-    N: ArrayLength<Coefficient<P>>,
+    Coefficient: Default,
+    N: ArrayLength<Coefficient>,
     R: Bit,
 {
-    type Output = Poly<P, N, R>;
+    type Output = Poly<N, R>;
 
-    fn add(self, other: &'b Poly<P, N, R>) -> Self::Output {
+    fn add(self, other: &'b Poly<N, R>) -> Self::Output {
         let mut c = GenericArray::default();
 
         for i in 0..N::USIZE {
@@ -409,16 +264,15 @@ where
     }
 }
 
-impl<'a, 'b, P, N, R> Sub<&'b Poly<P, N, R>> for &'a Poly<P, N, R>
+impl<'a, 'b, N, R> Sub<&'b Poly<N, R>> for &'a Poly<N, R>
 where
-    P: Params,
-    Coefficient<P>: Default,
-    N: ArrayLength<Coefficient<P>>,
+    Coefficient: Default,
+    N: ArrayLength<Coefficient>,
     R: Bit,
 {
-    type Output = Poly<P, N, R>;
+    type Output = Poly<N, R>;
 
-    fn sub(self, other: &'b Poly<P, N, R>) -> Self::Output {
+    fn sub(self, other: &'b Poly<N, R>) -> Self::Output {
         let mut c = GenericArray::default();
 
         for i in 0..N::USIZE {
@@ -432,16 +286,15 @@ where
     }
 }
 
-impl<'a, 'b, P, N, R> Mul<&'b Poly<P, N, R>> for &'a Poly<P, N, R>
+impl<'a, 'b, N, R> Mul<&'b Poly<N, R>> for &'a Poly<N, R>
 where
-    P: Params,
-    Coefficient<P>: Default,
-    N: ArrayLength<Coefficient<P>>,
+    Coefficient: Default,
+    N: ArrayLength<Coefficient>,
     R: Bit,
 {
-    type Output = Poly<P, N, R>;
+    type Output = Poly<N, R>;
 
-    fn mul(self, other: &'b Poly<P, N, R>) -> Self::Output {
+    fn mul(self, other: &'b Poly<N, R>) -> Self::Output {
         let mut c = GenericArray::default();
 
         for i in 0..N::USIZE {
@@ -455,31 +308,20 @@ where
     }
 }
 
-impl<P, R> Poly<P, U1024, R>
+pub trait Ntt {
+    type Output: Ntt;
+
+    fn reverse_bits(self) -> Self::Output;
+    fn ntt(self) -> Self::Output;
+    fn inv_ntt(self) -> Self::Output;
+}
+
+impl<R> Poly<U1024, R>
 where
-    P: Params,
-    Coefficient<P>: Default + Clone,
+    Coefficient: Default + Clone,
     R: Bit + BitXor<B1>,
     <R as BitXor<B1>>::Output: Bit + BitXor<B1, Output = R>,
 {
-    pub fn reverse_bits(self) -> Poly<P, U1024, <R as BitXor<B1>>::Output> {
-        let mut s = Poly {
-            coefficients: self.coefficients,
-            phantom_data: PhantomData,
-        };
-
-        for i in 0..1024 {
-            let j = super::tables::BITREV[i] as usize;
-            if i < j {
-                let temp = s.coefficients[i].clone();
-                s.coefficients[i] = s.coefficients[j].clone();
-                s.coefficients[j] = temp;
-            }
-        }
-
-        s
-    }
-
     fn multiply(self, gammas: &[u16]) -> Self {
         let mut s = self;
 
@@ -491,7 +333,7 @@ where
         s
     }
 
-    fn transform(self, omegas: &[u16]) -> Poly<P, U1024, <R as BitXor<B1>>::Output> {
+    fn transform(self, omegas: &[u16]) -> Poly<U1024, <R as BitXor<B1>>::Output> {
         let mut s = Poly {
             coefficients: self.coefficients,
             phantom_data: PhantomData,
@@ -520,13 +362,40 @@ where
 
         s
     }
+}
 
-    pub fn ntt(self) -> Poly<P, U1024, <R as BitXor<B1>>::Output> {
+impl<R> Ntt for Poly<U1024, R>
+where
+    Coefficient: Default + Clone,
+    R: Bit + BitXor<B1>,
+    <R as BitXor<B1>>::Output: Bit + BitXor<B1, Output = R>,
+{
+    type Output = Poly<U1024, <R as BitXor<B1>>::Output>;
+
+    fn reverse_bits(self) -> Self::Output {
+        let mut s = Poly {
+            coefficients: self.coefficients,
+            phantom_data: PhantomData,
+        };
+
+        for i in 0..1024 {
+            let j = super::tables::BITREV[i] as usize;
+            if i < j {
+                let temp = s.coefficients[i].clone();
+                s.coefficients[i] = s.coefficients[j].clone();
+                s.coefficients[j] = temp;
+            }
+        }
+
+        s
+    }
+
+    fn ntt(self) -> Self::Output {
         self.multiply(super::tables::GAMMAS_BITREV_MONTGOMERY.as_ref())
             .transform(super::tables::GAMMAS_BITREV_MONTGOMERY.as_ref())
     }
 
-    pub fn inv_ntt(self) -> Poly<P, U1024, <R as BitXor<B1>>::Output> {
+    fn inv_ntt(self) -> Self::Output {
         self.transform(super::tables::OMEGAS_INV_BITREV_MONTGOMERY.as_ref())
             .multiply(super::tables::GAMMAS_INV_MONTGOMERY.as_ref())
     }

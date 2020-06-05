@@ -1,44 +1,70 @@
-use super::poly::{Params, Poly, PolyCompressed, Coefficient, Message};
-use core::fmt;
-use generic_array::typenum::{B0, B1, U1024};
+use super::{
+    message::Message,
+    coefficient::Coefficient,
+    poly::{Poly, PolyCompressed, Ntt},
+};
+use core::{
+    fmt,
+    ops::{Div, Mul},
+};
+use generic_array::{ArrayLength, typenum::{B0, B1, U3, U8, U14}};
 
-pub struct PublicKeyCpa<P>
+pub struct PublicKeyCpa<N>
 where
-    P: Params,
+    N: ArrayLength<Coefficient> + Div<U8>,
+    <N as Div<U8>>::Output: Mul<U14> + Mul<U3>,
+    <<N as Div<U8>>::Output as Mul<U14>>::Output: ArrayLength<u8>,
+    <<N as Div<U8>>::Output as Mul<U3>>::Output: ArrayLength<u8>,
+    Poly<N, B1>: Ntt<Output = Poly<N, B0>>,
+    Poly<N, B0>: Ntt<Output = Poly<N, B1>>,
 {
-    b_hat: Poly<P, U1024, B0>,
+    b_hat: Poly<N, B0>,
     seed: Message,
 }
 
-pub struct SecretKeyCpa<P>
+pub struct SecretKeyCpa<N>
 where
-    P: Params,
+    N: ArrayLength<Coefficient> + Div<U8>,
+    <N as Div<U8>>::Output: Mul<U14> + Mul<U3>,
+    <<N as Div<U8>>::Output as Mul<U14>>::Output: ArrayLength<u8>,
+    <<N as Div<U8>>::Output as Mul<U3>>::Output: ArrayLength<u8>,
+    Poly<N, B1>: Ntt<Output = Poly<N, B0>>,
+    Poly<N, B0>: Ntt<Output = Poly<N, B1>>,
 {
-    s_hat: Poly<P, U1024, B0>,
+    s_hat: Poly<N, B0>,
 }
 
-pub struct CipherTextCpa<P>
+pub struct CipherTextCpa<N>
 where
-    P: Params,
+    N: ArrayLength<Coefficient> + Div<U8>,
+    <N as Div<U8>>::Output: Mul<U14> + Mul<U3>,
+    <<N as Div<U8>>::Output as Mul<U14>>::Output: ArrayLength<u8>,
+    <<N as Div<U8>>::Output as Mul<U3>>::Output: ArrayLength<u8>,
+    Poly<N, B1>: Ntt<Output = Poly<N, B0>>,
+    Poly<N, B0>: Ntt<Output = Poly<N, B1>>,
 {
-    u_hat: Poly<P, U1024, B0>,
-    v_prime: PolyCompressed<P, U1024, B0>,
+    u_hat: Poly<N, B0>,
+    v_prime: PolyCompressed<N, B0>,
 }
 
 #[derive(Default, Eq, PartialEq, Debug)]
 pub struct SharedSecretCpa(pub Message);
 
-impl<P> PublicKeyCpa<P>
+impl<N> PublicKeyCpa<N>
 where
-    P: Params,
-    Coefficient<P>: Default + Clone,
+    N: ArrayLength<Coefficient> + Div<U8>,
+    <N as Div<U8>>::Output: Mul<U14> + Mul<U3>,
+    <<N as Div<U8>>::Output as Mul<U14>>::Output: ArrayLength<u8>,
+    <<N as Div<U8>>::Output as Mul<U3>>::Output: ArrayLength<u8>,
+    Poly<N, B1>: Ntt<Output = Poly<N, B0>>,
+    Poly<N, B0>: Ntt<Output = Poly<N, B1>>,
 {
-    pub fn generate(seed: Message) -> (Self, SecretKeyCpa<P>) {
+    pub fn generate(seed: Message) -> (Self, SecretKeyCpa<N>) {
         let (public_seed, noise_seed) = seed.expand(1);
 
         let a_hat = Poly::uniform(&public_seed);
-        let s_hat = Poly::<_, _, B1>::sample(&noise_seed, 0).ntt();
-        let e_hat = Poly::<_, _, B1>::sample(&noise_seed, 1).ntt();
+        let s_hat = Poly::<_, B1>::sample(&noise_seed, 0).ntt();
+        let e_hat = Poly::<_, B1>::sample(&noise_seed, 1).ntt();
 
         let b_hat = &e_hat + &(&a_hat * &s_hat);
         (
@@ -50,13 +76,13 @@ where
         )
     }
 
-    pub fn encapsulate(&self, seed: Message) -> (CipherTextCpa<P>, SharedSecretCpa) {
+    pub fn encapsulate(&self, seed: Message) -> (CipherTextCpa<N>, SharedSecretCpa) {
         let (message, noise_seed) = seed.expand(2);
 
-        let v = Poly::from_message(&message);
+        let v = Poly::<N, B0>::from_message(&message);
         let a_hat = Poly::uniform(&self.seed);
-        let s_prime = Poly::<_, _, B1>::sample(&noise_seed, 0).ntt();
-        let e_prime = Poly::<_, _, B1>::sample(&noise_seed, 1).ntt();
+        let s_prime = Poly::<_, B1>::sample(&noise_seed, 0).ntt();
+        let e_prime = Poly::<_, B1>::sample(&noise_seed, 1).ntt();
         let e_prime_prime = Poly::sample(&noise_seed, 2);
 
         let u_hat = &e_prime + &(&a_hat * &s_prime);
@@ -72,22 +98,30 @@ where
     }
 }
 
-impl<P> SecretKeyCpa<P>
+impl<N> SecretKeyCpa<N>
 where
-    P: Params,
-    Coefficient<P>: Default + Clone,
+    N: ArrayLength<Coefficient> + Div<U8>,
+    <N as Div<U8>>::Output: Mul<U14> + Mul<U3>,
+    <<N as Div<U8>>::Output as Mul<U14>>::Output: ArrayLength<u8>,
+    <<N as Div<U8>>::Output as Mul<U3>>::Output: ArrayLength<u8>,
+    Poly<N, B1>: Ntt<Output = Poly<N, B0>>,
+    Poly<N, B0>: Ntt<Output = Poly<N, B1>>,
 {
-    pub fn decapsulate(&self, cipher_text: &CipherTextCpa<P>) -> SharedSecretCpa {
+    pub fn decapsulate(&self, cipher_text: &CipherTextCpa<N>) -> SharedSecretCpa {
         let v_prime = Poly::decompress(&cipher_text.v_prime);
         let temp = &(&self.s_hat * &cipher_text.u_hat).reverse_bits().inv_ntt() - &v_prime;
         SharedSecretCpa(temp.to_message().hash())
     }
 }
 
-impl<P> fmt::Debug for PublicKeyCpa<P>
+impl<N> fmt::Debug for PublicKeyCpa<N>
 where
-    P: Params,
-    Coefficient<P>: Default,
+    N: ArrayLength<Coefficient> + Div<U8>,
+    <N as Div<U8>>::Output: Mul<U14> + Mul<U3>,
+    <<N as Div<U8>>::Output as Mul<U14>>::Output: ArrayLength<u8>,
+    <<N as Div<U8>>::Output as Mul<U3>>::Output: ArrayLength<u8>,
+    Poly<N, B1>: Ntt<Output = Poly<N, B0>>,
+    Poly<N, B0>: Ntt<Output = Poly<N, B1>>,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let poly = hex::encode(self.b_hat.bytes());
