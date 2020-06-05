@@ -1,4 +1,4 @@
-use crate::pure::{PublicKeyCpa, Message};
+use crate::{PublicKeyCpa, Message};
 use generic_array::typenum::U1024;
 
 #[test]

@@ -4,9 +4,13 @@
 #[macro_use]
 extern crate std;
 
-mod traits;
-pub use self::traits::{PublicKey, SecretKey};
-
-pub mod pure;
+mod message;
+mod coefficient;
+mod poly;
+mod tables;
+mod kem;
 #[cfg(test)]
 mod test;
+
+pub use self::message::Message;
+pub use self::kem::{PublicKeyCpa, SecretKeyCpa};
