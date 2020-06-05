@@ -4,7 +4,7 @@
 #[macro_use]
 extern crate std;
 
-mod message;
+mod hash;
 mod coefficient;
 mod poly;
 mod tables;

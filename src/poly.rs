@@ -1,4 +1,4 @@
-use super::{message::Message, coefficient::Coefficient};
+use super::{hash, coefficient::Coefficient};
 use core::{
     marker::PhantomData,
     ops::{Mul, Add, Sub, BitXor},
@@ -37,10 +37,10 @@ pub trait Compressible {
 }
 
 pub trait FromSeed {
-    fn from_message(message: &Message) -> Self;
-    fn to_message(&self) -> Message;
-    fn uniform(seed: &Message) -> Self;
-    fn sample(seed: &Message, nonce: u8) -> Self;
+    fn from_message(message: &[u8; 32]) -> Self;
+    fn to_message(&self) -> [u8; 32];
+    fn uniform(seed: &[u8; 32]) -> Self;
+    fn sample(seed: &[u8; 32], nonce: u8) -> Self;
 }
 
 pub struct Poly<N, R>
@@ -172,12 +172,12 @@ where
     N: Packable + Compressible<PolyLength = <N as Packable>::PolyLength> + Unsigned,
     R: Bit,
 {
-    fn from_message(message: &Message) -> Self {
+    fn from_message(message: &[u8; 32]) -> Self {
         let mut c = GenericArray::default();
 
         for i in 0..(N::USIZE * 8) {
             let l = i % 256;
-            if (message.0[l / 8] & (1 << (l % 8))) != 0 {
+            if (message[l / 8] & (1 << (l % 8))) != 0 {
                 c[i] = Coefficient::MIDDLE;
             }
         }
@@ -188,11 +188,11 @@ where
         }
     }
 
-    fn to_message(&self) -> Message {
+    fn to_message(&self) -> [u8; 32] {
         const BITS: usize = 256;
         let coefficients = N::USIZE * 8;
         let mut t = [0; BITS];
-        let mut message = Message::default();
+        let mut message = [0; 32];
 
         for i in 0..coefficients {
             t[i % BITS] += self.coefficients[i].flip_abs() as u32;
@@ -200,14 +200,14 @@ where
 
         for l in 0..BITS {
             if t[l] < (Coefficient::QUARTER.data() * (coefficients as u32) / (BITS as u32)) {
-                message.0[l / 8] |= 1 << (l % 8);
+                message[l / 8] |= 1 << (l % 8);
             }
         }
 
         message
     }
 
-    fn uniform(seed: &Message) -> Self {
+    fn uniform(seed: &[u8; 32]) -> Self {
         use sha3::{
             Shake128,
             digest::{Input, ExtendableOutput, XofReader},
@@ -216,7 +216,7 @@ where
         let mut c = GenericArray::default();
 
         let mut ext_seed = [0; 33];
-        ext_seed[0..32].clone_from_slice(seed.0.as_ref());
+        ext_seed[0..32].clone_from_slice(seed.as_ref());
         for i in 0..((N::USIZE * 8) / Self::BLOCK_SIZE) {
             ext_seed[32] = i as u8;
             let mut h = Shake128::default().chain(ext_seed.as_ref()).xof_result();
@@ -246,16 +246,11 @@ where
         }
     }
 
-    fn sample(seed: &Message, nonce: u8) -> Self {
-        use sha3::{
-            Shake256,
-            digest::{Input, ExtendableOutput, XofReader},
-        };
-
+    fn sample(seed: &[u8; 32], nonce: u8) -> Self {
         let mut c = GenericArray::default();
 
         let mut ext_seed = [0; 34];
-        ext_seed[0..32].clone_from_slice(seed.0.as_ref());
+        ext_seed[0..32].clone_from_slice(seed.as_ref());
         ext_seed[32] = nonce;
 
         for i in 0..((N::USIZE * 8) / Self::BLOCK_SIZE) {
@@ -264,9 +259,8 @@ where
             // Compute the Hamming weight of a byte
             let hw = |b: u8| -> i8 { (0..8).map(|i| ((b >> i) & 1) as i8).sum() };
 
-            let mut h = Shake256::default().chain(ext_seed.as_ref()).xof_result();
             let mut buffer = [0; Self::BLOCK_SIZE * 2];
-            h.read(buffer.as_mut());
+            hash::shake256(ext_seed.as_ref(), buffer.as_mut());
             for j in 0..Self::BLOCK_SIZE {
                 c[Self::BLOCK_SIZE * i + j] =
                     Coefficient::small(hw(buffer[2 * j]) - hw(buffer[2 * j + 1]));

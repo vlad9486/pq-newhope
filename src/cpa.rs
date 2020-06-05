@@ -1,6 +1,6 @@
 use super::{
     kem::Kem,
-    message::Message,
+    hash,
     poly::{Poly, PolyCompressed, Packable, Compressible, FromSeed, Ntt},
 };
 use core::marker::PhantomData;
@@ -18,7 +18,7 @@ where
     N: Packable + Compressible<PolyLength = <N as Packable>::PolyLength>,
 {
     b_hat: Poly<N, B0>,
-    seed: Message,
+    seed: [u8; 32],
 }
 
 pub struct SecretKeyCpa<N>
@@ -52,9 +52,7 @@ where
     fn generate(
         seed: GenericArray<u8, Self::GenerateSeedLength>,
     ) -> (Self::PublicKey, Self::SecretKey) {
-        let mut m_seed = Message::default();
-        m_seed.0.clone_from_slice(seed.as_ref());
-        let (public_seed, noise_seed) = m_seed.expand(1);
+        let (public_seed, noise_seed) = hash::expand(seed.as_ref(), 1);
 
         let a_hat = Poly::uniform(&public_seed);
         let s_hat = Poly::<_, B1>::sample(&noise_seed, 0).ntt();
@@ -74,9 +72,7 @@ where
         public_key: &Self::PublicKey,
         seed: GenericArray<u8, Self::EncapsulateSeedLength>,
     ) -> (Self::CipherText, GenericArray<u8, Self::SharedSecretLength>) {
-        let mut m_seed = Message::default();
-        m_seed.0.clone_from_slice(seed.as_ref());
-        let (message, noise_seed) = m_seed.expand(2);
+        let (message, noise_seed) = hash::expand(seed.as_ref(), 2);
 
         let v = Poly::<N, B0>::from_message(&message);
         let a_hat = Poly::uniform(&public_key.seed);
@@ -88,7 +84,7 @@ where
         let temp = (&public_key.b_hat * &s_prime).reverse_bits().inv_ntt();
         let v_prime = &(&(&temp + &e_prime_prime) + &v);
         let mut shared_secret = GenericArray::default();
-        shared_secret.clone_from_slice(message.hash().as_ref());
+        hash::shake256(message.as_ref(), shared_secret.as_mut());
         (
             CipherTextCpa {
                 u_hat: u_hat,
@@ -108,7 +104,7 @@ where
             .inv_ntt();
         let temp = &temp - &v_prime;
         let mut shared_secret = GenericArray::default();
-        shared_secret.clone_from_slice(temp.to_message().hash().as_ref());
+        hash::shake256(temp.to_message().as_ref(), shared_secret.as_mut());
         shared_secret
     }
 }
