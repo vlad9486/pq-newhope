@@ -4,55 +4,54 @@ use super::{
 };
 use core::{
     marker::PhantomData,
-    ops::{Mul, Div, Add, Sub, BitXor},
+    ops::{Mul, Add, Sub, BitXor},
 };
 use generic_array::{
     GenericArray, ArrayLength,
-    typenum::{U8, U14, U3, Bit, B1, U1024},
+    typenum::{Unsigned, U8, U14, U3, Bit, B1, U1024},
 };
 
 pub struct Poly<N, R>
 where
-    N: ArrayLength<Coefficient>,
+    N: Mul<U8> + Unsigned,
+    <N as Mul<U8>>::Output: ArrayLength<Coefficient>,
     R: Bit,
 {
-    coefficients: GenericArray<Coefficient, N>,
+    coefficients: GenericArray<Coefficient, <N as Mul<U8>>::Output>,
     phantom_data: PhantomData<R>,
 }
 
 pub struct PolyCompressed<N, R>
 where
-    N: Div<U8>,
-    <N as Div<U8>>::Output: Mul<U3>,
-    <<N as Div<U8>>::Output as Mul<U3>>::Output: ArrayLength<u8>,
+    N: Mul<U3>,
+    <N as Mul<U3>>::Output: ArrayLength<u8>,
     R: Bit,
 {
-    coefficients: GenericArray<u8, <<N as Div<U8>>::Output as Mul<U3>>::Output>,
+    coefficients: GenericArray<u8, <N as Mul<U3>>::Output>,
     phantom_data: PhantomData<R>,
 }
 
 impl<N, R> Poly<N, R>
 where
-    Coefficient: Default,
-    N: ArrayLength<Coefficient> + Div<U8>,
-    <N as Div<U8>>::Output: Mul<U14> + Mul<U3>,
-    <<N as Div<U8>>::Output as Mul<U14>>::Output: ArrayLength<u8>,
-    <<N as Div<U8>>::Output as Mul<U3>>::Output: ArrayLength<u8>,
+    N: Mul<U8> + Mul<U3> + Mul<U14> + Unsigned,
+    <N as Mul<U8>>::Output: ArrayLength<Coefficient>,
+    <N as Mul<U3>>::Output: ArrayLength<u8>,
+    <N as Mul<U14>>::Output: ArrayLength<u8>,
     R: Bit,
 {
     const BLOCK_SIZE: usize = 1 << 6;
 
-    pub fn from_bytes(bytes: &GenericArray<u8, <<N as Div<U8>>::Output as Mul<U14>>::Output>) -> Self {
+    pub fn from_bytes(bytes: &GenericArray<u8, <N as Mul<U14>>::Output>) -> Self {
         assert!((N::USIZE & (N::USIZE - 1)) == 0, "should be power of two");
 
         assert!(
-            N::USIZE < Self::BLOCK_SIZE * 256,
+            N::USIZE * 8 < Self::BLOCK_SIZE * 256,
             "block has {} coefficients, index of the block should fit in byte",
             Self::BLOCK_SIZE,
         );
 
         let mut c = GenericArray::default();
-        for i in 0..(N::USIZE / 4) {
+        for i in 0..(N::USIZE * 2) {
             let a = |j| bytes[7 * i + j] as u16;
             let c = &mut c[(4 * i)..(4 * (i + 1))];
 
@@ -68,10 +67,10 @@ where
         }
     }
 
-    pub fn bytes(&self) -> GenericArray<u8, <<N as Div<U8>>::Output as Mul<U14>>::Output> {
+    pub fn bytes(&self) -> GenericArray<u8, <N as Mul<U14>>::Output> {
         let mut a = GenericArray::default();
 
-        for i in 0..(N::USIZE / 4) {
+        for i in 0..(N::USIZE * 2) {
             // memorize?
             let t = |j: usize| -> u16 {
                 let c: &Coefficient = &self.coefficients[4 * i + j];
@@ -93,7 +92,7 @@ where
     pub fn compress(&self) -> PolyCompressed<N, R> {
         let mut a = GenericArray::default();
 
-        for i in 0..(N::USIZE / 8) {
+        for i in 0..N::USIZE {
             // memorize?
             let t = |j: usize| -> u8 {
                 let c: &Coefficient = &self.coefficients[8 * i + j];
@@ -116,7 +115,7 @@ where
     pub fn decompress(p: &PolyCompressed<N, R>) -> Self {
         let mut c = GenericArray::default();
 
-        for i in 0..(N::USIZE / 8) {
+        for i in 0..N::USIZE {
             let a = &p.coefficients[(3 * i)..(3 * (i + 1))];
             let t = [
                 a[0] & 0x07,
@@ -142,7 +141,7 @@ where
     pub fn from_message(message: &Message) -> Self {
         let mut c = GenericArray::default();
 
-        for i in 0..N::USIZE {
+        for i in 0..(N::USIZE * 8) {
             let l = i % 256;
             if (message.0[l / 8] & (1 << (l % 8))) != 0 {
                 c[i] = Coefficient::new(Coefficient::Q / 2);
@@ -159,12 +158,12 @@ where
         let mut t = [0; 256];
         let mut message = Message::default();
 
-        for i in 0..N::USIZE {
+        for i in 0..(N::USIZE * 8) {
             t[i % 256] += self.coefficients[i].flip_abs() as u32;
         }
 
         for l in 0..256 {
-            if t[l] < (((Coefficient::Q as usize) * N::USIZE / 1024) as u32) {
+            if t[l] < (((Coefficient::Q as usize) * N::USIZE / 128) as u32) {
                 message.0[l / 8] |= 1 << (l % 8);
             }
         }
@@ -182,7 +181,7 @@ where
 
         let mut ext_seed = [0; 33];
         ext_seed[0..32].clone_from_slice(seed.0.as_ref());
-        for i in 0..(N::USIZE / Self::BLOCK_SIZE) {
+        for i in 0..((N::USIZE * 8) / Self::BLOCK_SIZE) {
             ext_seed[32] = i as u8;
             let mut h = Shake128::default().chain(ext_seed.as_ref()).xof_result();
             let mut counter = 0;
@@ -220,7 +219,7 @@ where
         ext_seed[0..32].clone_from_slice(seed.0.as_ref());
         ext_seed[32] = nonce;
 
-        for i in 0..(N::USIZE / Self::BLOCK_SIZE) {
+        for i in 0..((N::USIZE * 8) / Self::BLOCK_SIZE) {
             ext_seed[33] = i as u8;
 
             // Compute the Hamming weight of a byte
@@ -244,8 +243,8 @@ where
 
 impl<'a, 'b, N, R> Add<&'b Poly<N, R>> for &'a Poly<N, R>
 where
-    Coefficient: Default,
-    N: ArrayLength<Coefficient>,
+    N: Mul<U8> + Unsigned,
+    <N as Mul<U8>>::Output: ArrayLength<Coefficient>,
     R: Bit,
 {
     type Output = Poly<N, R>;
@@ -253,7 +252,7 @@ where
     fn add(self, other: &'b Poly<N, R>) -> Self::Output {
         let mut c = GenericArray::default();
 
-        for i in 0..N::USIZE {
+        for i in 0..(N::USIZE * 8) {
             c[i] = &self.coefficients[i] + &other.coefficients[i];
         }
 
@@ -266,8 +265,8 @@ where
 
 impl<'a, 'b, N, R> Sub<&'b Poly<N, R>> for &'a Poly<N, R>
 where
-    Coefficient: Default,
-    N: ArrayLength<Coefficient>,
+    N: Mul<U8> + Unsigned,
+    <N as Mul<U8>>::Output: ArrayLength<Coefficient>,
     R: Bit,
 {
     type Output = Poly<N, R>;
@@ -275,7 +274,7 @@ where
     fn sub(self, other: &'b Poly<N, R>) -> Self::Output {
         let mut c = GenericArray::default();
 
-        for i in 0..N::USIZE {
+        for i in 0..(N::USIZE * 8) {
             c[i] = &self.coefficients[i] - &other.coefficients[i];
         }
 
@@ -288,8 +287,8 @@ where
 
 impl<'a, 'b, N, R> Mul<&'b Poly<N, R>> for &'a Poly<N, R>
 where
-    Coefficient: Default,
-    N: ArrayLength<Coefficient>,
+    N: Mul<U8> + Unsigned,
+    <N as Mul<U8>>::Output: ArrayLength<Coefficient>,
     R: Bit,
 {
     type Output = Poly<N, R>;
@@ -297,7 +296,7 @@ where
     fn mul(self, other: &'b Poly<N, R>) -> Self::Output {
         let mut c = GenericArray::default();
 
-        for i in 0..N::USIZE {
+        for i in 0..(N::USIZE * 8) {
             c[i] = &self.coefficients[i] * &other.coefficients[i];
         }
 
@@ -318,7 +317,6 @@ pub trait Ntt {
 
 impl<R> Poly<U1024, R>
 where
-    Coefficient: Default + Clone,
     R: Bit + BitXor<B1>,
     <R as BitXor<B1>>::Output: Bit + BitXor<B1, Output = R>,
 {

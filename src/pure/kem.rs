@@ -5,16 +5,16 @@ use super::{
 };
 use core::{
     fmt,
-    ops::{Div, Mul},
+    ops::Mul,
 };
-use generic_array::{ArrayLength, typenum::{B0, B1, U3, U8, U14}};
+use generic_array::{ArrayLength, typenum::{Unsigned, B0, B1, U3, U8, U14}};
 
 pub struct PublicKeyCpa<N>
 where
-    N: ArrayLength<Coefficient> + Div<U8>,
-    <N as Div<U8>>::Output: Mul<U14> + Mul<U3>,
-    <<N as Div<U8>>::Output as Mul<U14>>::Output: ArrayLength<u8>,
-    <<N as Div<U8>>::Output as Mul<U3>>::Output: ArrayLength<u8>,
+    N: Mul<U8> + Mul<U3> + Mul<U14> + Unsigned,
+    <N as Mul<U8>>::Output: ArrayLength<Coefficient>,
+    <N as Mul<U3>>::Output: ArrayLength<u8>,
+    <N as Mul<U14>>::Output: ArrayLength<u8>,
     Poly<N, B1>: Ntt<Output = Poly<N, B0>>,
     Poly<N, B0>: Ntt<Output = Poly<N, B1>>,
 {
@@ -24,10 +24,10 @@ where
 
 pub struct SecretKeyCpa<N>
 where
-    N: ArrayLength<Coefficient> + Div<U8>,
-    <N as Div<U8>>::Output: Mul<U14> + Mul<U3>,
-    <<N as Div<U8>>::Output as Mul<U14>>::Output: ArrayLength<u8>,
-    <<N as Div<U8>>::Output as Mul<U3>>::Output: ArrayLength<u8>,
+    N: Mul<U8> + Mul<U3> + Mul<U14> + Unsigned,
+    <N as Mul<U8>>::Output: ArrayLength<Coefficient>,
+    <N as Mul<U3>>::Output: ArrayLength<u8>,
+    <N as Mul<U14>>::Output: ArrayLength<u8>,
     Poly<N, B1>: Ntt<Output = Poly<N, B0>>,
     Poly<N, B0>: Ntt<Output = Poly<N, B1>>,
 {
@@ -36,10 +36,10 @@ where
 
 pub struct CipherTextCpa<N>
 where
-    N: ArrayLength<Coefficient> + Div<U8>,
-    <N as Div<U8>>::Output: Mul<U14> + Mul<U3>,
-    <<N as Div<U8>>::Output as Mul<U14>>::Output: ArrayLength<u8>,
-    <<N as Div<U8>>::Output as Mul<U3>>::Output: ArrayLength<u8>,
+    N: Mul<U8> + Mul<U3> + Mul<U14> + Unsigned,
+    <N as Mul<U8>>::Output: ArrayLength<Coefficient>,
+    <N as Mul<U3>>::Output: ArrayLength<u8>,
+    <N as Mul<U14>>::Output: ArrayLength<u8>,
     Poly<N, B1>: Ntt<Output = Poly<N, B0>>,
     Poly<N, B0>: Ntt<Output = Poly<N, B1>>,
 {
@@ -52,10 +52,10 @@ pub struct SharedSecretCpa(pub Message);
 
 impl<N> PublicKeyCpa<N>
 where
-    N: ArrayLength<Coefficient> + Div<U8>,
-    <N as Div<U8>>::Output: Mul<U14> + Mul<U3>,
-    <<N as Div<U8>>::Output as Mul<U14>>::Output: ArrayLength<u8>,
-    <<N as Div<U8>>::Output as Mul<U3>>::Output: ArrayLength<u8>,
+    N: Mul<U8> + Mul<U3> + Mul<U14> + Unsigned,
+    <N as Mul<U8>>::Output: ArrayLength<Coefficient>,
+    <N as Mul<U3>>::Output: ArrayLength<u8>,
+    <N as Mul<U14>>::Output: ArrayLength<u8>,
     Poly<N, B1>: Ntt<Output = Poly<N, B0>>,
     Poly<N, B0>: Ntt<Output = Poly<N, B1>>,
 {
@@ -100,10 +100,10 @@ where
 
 impl<N> SecretKeyCpa<N>
 where
-    N: ArrayLength<Coefficient> + Div<U8>,
-    <N as Div<U8>>::Output: Mul<U14> + Mul<U3>,
-    <<N as Div<U8>>::Output as Mul<U14>>::Output: ArrayLength<u8>,
-    <<N as Div<U8>>::Output as Mul<U3>>::Output: ArrayLength<u8>,
+    N: Mul<U8> + Mul<U3> + Mul<U14> + Unsigned,
+    <N as Mul<U8>>::Output: ArrayLength<Coefficient>,
+    <N as Mul<U3>>::Output: ArrayLength<u8>,
+    <N as Mul<U14>>::Output: ArrayLength<u8>,
     Poly<N, B1>: Ntt<Output = Poly<N, B0>>,
     Poly<N, B0>: Ntt<Output = Poly<N, B1>>,
 {
@@ -116,10 +116,10 @@ where
 
 impl<N> fmt::Debug for PublicKeyCpa<N>
 where
-    N: ArrayLength<Coefficient> + Div<U8>,
-    <N as Div<U8>>::Output: Mul<U14> + Mul<U3>,
-    <<N as Div<U8>>::Output as Mul<U14>>::Output: ArrayLength<u8>,
-    <<N as Div<U8>>::Output as Mul<U3>>::Output: ArrayLength<u8>,
+    N: Mul<U8> + Mul<U3> + Mul<U14> + Unsigned,
+    <N as Mul<U8>>::Output: ArrayLength<Coefficient>,
+    <N as Mul<U3>>::Output: ArrayLength<u8>,
+    <N as Mul<U14>>::Output: ArrayLength<u8>,
     Poly<N, B1>: Ntt<Output = Poly<N, B0>>,
     Poly<N, B0>: Ntt<Output = Poly<N, B1>>,
 {
