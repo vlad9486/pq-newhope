@@ -1,7 +1,4 @@
-use super::{
-    message::Message,
-    coefficient::Coefficient,
-};
+use super::{message::Message, coefficient::Coefficient};
 use core::{
     marker::PhantomData,
     ops::{Mul, Add, Sub, BitXor},
@@ -11,66 +8,80 @@ use generic_array::{
     typenum::{Unsigned, U8, U14, U3, Bit, B1, U1024},
 };
 
+pub trait Packable {
+    type PolyLength: ArrayLength<Coefficient>;
+
+    type PackedLength: ArrayLength<u8>;
+
+    fn pack(
+        v: &GenericArray<Coefficient, Self::PolyLength>,
+    ) -> GenericArray<u8, Self::PackedLength>;
+
+    fn unpack(
+        v: &GenericArray<u8, Self::PackedLength>,
+    ) -> GenericArray<Coefficient, Self::PolyLength>;
+}
+
+pub trait Compressible {
+    type PolyLength: ArrayLength<Coefficient>;
+
+    type CompressedLength: ArrayLength<u8>;
+
+    fn compress(
+        v: &GenericArray<Coefficient, Self::PolyLength>,
+    ) -> GenericArray<u8, Self::CompressedLength>;
+
+    fn decompress(
+        v: &GenericArray<u8, Self::CompressedLength>,
+    ) -> GenericArray<Coefficient, Self::PolyLength>;
+}
+
+pub trait FromSeed {
+    fn from_message(message: &Message) -> Self;
+    fn to_message(&self) -> Message;
+    fn uniform(seed: &Message) -> Self;
+    fn sample(seed: &Message, nonce: u8) -> Self;
+}
+
 pub struct Poly<N, R>
 where
-    N: Mul<U8> + Unsigned,
-    <N as Mul<U8>>::Output: ArrayLength<Coefficient>,
+    N: Packable + Compressible<PolyLength = <N as Packable>::PolyLength>,
     R: Bit,
 {
-    coefficients: GenericArray<Coefficient, <N as Mul<U8>>::Output>,
+    coefficients: GenericArray<Coefficient, <N as Compressible>::PolyLength>,
     phantom_data: PhantomData<R>,
 }
 
 pub struct PolyCompressed<N, R>
 where
-    N: Mul<U3>,
-    <N as Mul<U3>>::Output: ArrayLength<u8>,
+    N: Packable + Compressible<PolyLength = <N as Packable>::PolyLength>,
     R: Bit,
 {
-    coefficients: GenericArray<u8, <N as Mul<U3>>::Output>,
+    coefficients: GenericArray<u8, <N as Compressible>::CompressedLength>,
     phantom_data: PhantomData<R>,
 }
 
-impl<N, R> Poly<N, R>
+impl<N> Packable for N
 where
-    N: Mul<U8> + Mul<U3> + Mul<U14> + Unsigned,
+    N: Mul<U8> + Mul<U14> + Unsigned,
     <N as Mul<U8>>::Output: ArrayLength<Coefficient>,
-    <N as Mul<U3>>::Output: ArrayLength<u8>,
     <N as Mul<U14>>::Output: ArrayLength<u8>,
-    R: Bit,
 {
-    const BLOCK_SIZE: usize = 1 << 6;
+    type PolyLength = <N as Mul<U8>>::Output;
+    type PackedLength = <N as Mul<U14>>::Output;
 
-    pub fn from_bytes(bytes: &GenericArray<u8, <N as Mul<U14>>::Output>) -> Self {
-        assert!((N::USIZE & (N::USIZE - 1)) == 0, "should be power of two");
-
-        let mut c = GenericArray::default();
-        for i in 0..(N::USIZE * 2) {
-            let a = |j| bytes[7 * i + j] as u16;
-            let c = &mut c[(4 * i)..(4 * (i + 1))];
-
-            c[0] = Coefficient::new((0x00 >> 0x8) | (a(0) << 0x0) | ((a(1) & 0x3f) << 0x8));
-            c[1] = Coefficient::new((a(1) >> 0x6) | (a(2) << 0x2) | ((a(3) & 0x0f) << 0xa));
-            c[2] = Coefficient::new((a(3) >> 0x4) | (a(4) << 0x4) | ((a(5) & 0x03) << 0xc));
-            c[3] = Coefficient::new((a(5) >> 0x2) | (a(6) << 0x6) | ((0x00 & 0x00) << 0xe));
-        }
-
-        Poly {
-            coefficients: c,
-            phantom_data: PhantomData,
-        }
-    }
-
-    pub fn bytes(&self) -> GenericArray<u8, <N as Mul<U14>>::Output> {
-        let mut a = GenericArray::default();
+    fn pack(
+        v: &GenericArray<Coefficient, Self::PolyLength>,
+    ) -> GenericArray<u8, Self::PackedLength> {
+        let mut r = GenericArray::default();
 
         for i in 0..(N::USIZE * 2) {
             let mut t = [0; 4];
             for j in 0..4 {
-                t[j] = self.coefficients[4 * i + j].freeze() as u16;
+                t[j] = v[4 * i + j].freeze() as u16;
             }
 
-            let r = &mut a[(7 * i)..(7 * (i + 1))];
+            let r = &mut r[(7 * i)..(7 * (i + 1))];
             r[0] = (t[0] & 0x00ff) as u8;
             r[1] = ((t[0] >> 0x8) | (t[1] << 0x6)) as u8;
             r[2] = (t[1] >> 0x2) as u8;
@@ -80,16 +91,46 @@ where
             r[6] = (t[3] >> 0x6) as u8;
         }
 
-        a
+        r
     }
 
-    pub fn compress(&self) -> PolyCompressed<N, R> {
+    fn unpack(
+        v: &GenericArray<u8, Self::PackedLength>,
+    ) -> GenericArray<Coefficient, Self::PolyLength> {
+        let mut c = GenericArray::default();
+
+        for i in 0..(N::USIZE * 2) {
+            let a = |j| v[7 * i + j] as u16;
+            let c = &mut c[(4 * i)..(4 * (i + 1))];
+
+            c[0] = Coefficient::new((0x00 >> 0x8) | (a(0) << 0x0) | ((a(1) & 0x3f) << 0x8));
+            c[1] = Coefficient::new((a(1) >> 0x6) | (a(2) << 0x2) | ((a(3) & 0x0f) << 0xa));
+            c[2] = Coefficient::new((a(3) >> 0x4) | (a(4) << 0x4) | ((a(5) & 0x03) << 0xc));
+            c[3] = Coefficient::new((a(5) >> 0x2) | (a(6) << 0x6) | ((0x00 & 0x00) << 0xe));
+        }
+
+        c
+    }
+}
+
+impl<N> Compressible for N
+where
+    N: Mul<U8> + Mul<U3> + Unsigned,
+    <N as Mul<U8>>::Output: ArrayLength<Coefficient>,
+    <N as Mul<U3>>::Output: ArrayLength<u8>,
+{
+    type PolyLength = <N as Mul<U8>>::Output;
+    type CompressedLength = <N as Mul<U3>>::Output;
+
+    fn compress(
+        v: &GenericArray<Coefficient, Self::PolyLength>,
+    ) -> GenericArray<u8, Self::CompressedLength> {
         let mut a = GenericArray::default();
 
         for i in 0..N::USIZE {
             let mut t = [0; 8];
             for j in 0..8 {
-                t[j] = self.coefficients[8 * i + j].compress()
+                t[j] = v[8 * i + j].compress()
             }
 
             a[3 * i + 0] = (t[0] >> 0x0) | (t[1] << 0x3) | (t[2] << 0x6);
@@ -97,17 +138,16 @@ where
             a[3 * i + 2] = (t[5] >> 0x1) | (t[6] << 0x2) | (t[7] << 0x5);
         }
 
-        PolyCompressed {
-            coefficients: a,
-            phantom_data: PhantomData,
-        }
+        a
     }
 
-    pub fn decompress(p: &PolyCompressed<N, R>) -> Self {
+    fn decompress(
+        v: &GenericArray<u8, Self::CompressedLength>,
+    ) -> GenericArray<Coefficient, Self::PolyLength> {
         let mut c = GenericArray::default();
 
         for i in 0..N::USIZE {
-            let a = &p.coefficients[(3 * i)..(3 * (i + 1))];
+            let a = &v[(3 * i)..(3 * (i + 1))];
             let t = [
                 a[0] & 0x07,
                 (a[0] >> 0x3) & 0x07,
@@ -123,13 +163,16 @@ where
             }
         }
 
-        Poly {
-            coefficients: c,
-            phantom_data: PhantomData,
-        }
+        c
     }
+}
 
-    pub fn from_message(message: &Message) -> Self {
+impl<N, R> FromSeed for Poly<N, R>
+where
+    N: Packable + Compressible<PolyLength = <N as Packable>::PolyLength> + Unsigned,
+    R: Bit,
+{
+    fn from_message(message: &Message) -> Self {
         let mut c = GenericArray::default();
 
         for i in 0..(N::USIZE * 8) {
@@ -145,18 +188,18 @@ where
         }
     }
 
-    pub fn to_message(&self) -> Message {
+    fn to_message(&self) -> Message {
         const BITS: usize = 256;
-        let coeffitients = N::USIZE * 8;
+        let coefficients = N::USIZE * 8;
         let mut t = [0; BITS];
         let mut message = Message::default();
 
-        for i in 0..coeffitients {
+        for i in 0..coefficients {
             t[i % BITS] += self.coefficients[i].flip_abs() as u32;
         }
 
         for l in 0..BITS {
-            if t[l] < (Coefficient::QUARTER.data() * (coeffitients as u32) / (BITS as u32)) {
+            if t[l] < (Coefficient::QUARTER.data() * (coefficients as u32) / (BITS as u32)) {
                 message.0[l / 8] |= 1 << (l % 8);
             }
         }
@@ -164,17 +207,11 @@ where
         message
     }
 
-    pub fn uniform(seed: &Message) -> Self {
+    fn uniform(seed: &Message) -> Self {
         use sha3::{
             Shake128,
             digest::{Input, ExtendableOutput, XofReader},
         };
-
-        assert!(
-            N::USIZE * 8 < Self::BLOCK_SIZE * 256,
-            "block has {} coefficients, index of the block should fit in byte",
-            Self::BLOCK_SIZE,
-        );
 
         let mut c = GenericArray::default();
 
@@ -209,7 +246,7 @@ where
         }
     }
 
-    pub fn sample(seed: &Message, nonce: u8) -> Self {
+    fn sample(seed: &Message, nonce: u8) -> Self {
         use sha3::{
             Shake256,
             digest::{Input, ExtendableOutput, XofReader},
@@ -231,7 +268,8 @@ where
             let mut buffer = [0; Self::BLOCK_SIZE * 2];
             h.read(buffer.as_mut());
             for j in 0..Self::BLOCK_SIZE {
-                c[Self::BLOCK_SIZE * i + j] = Coefficient::small(hw(buffer[2 * j]) - hw(buffer[2 * j + 1]));
+                c[Self::BLOCK_SIZE * i + j] =
+                    Coefficient::small(hw(buffer[2 * j]) - hw(buffer[2 * j + 1]));
             }
         }
 
@@ -242,10 +280,51 @@ where
     }
 }
 
+impl<N, R> Poly<N, R>
+where
+    N: Packable + Compressible<PolyLength = <N as Packable>::PolyLength> + Unsigned,
+    R: Bit,
+{
+    const BLOCK_SIZE: usize = 1 << 6;
+
+    pub fn rt_check() {
+        assert!((N::USIZE & (N::USIZE - 1)) == 0, "should be power of two");
+        assert!(
+            N::USIZE * 8 < Self::BLOCK_SIZE * 256,
+            "block has {} coefficients, index of the block should fit in byte",
+            Self::BLOCK_SIZE,
+        );
+    }
+
+    pub fn pack(&self) -> GenericArray<u8, N::PackedLength> {
+        N::pack(&self.coefficients)
+    }
+
+    pub fn unpack(v: &GenericArray<u8, N::PackedLength>) -> Self {
+        Poly {
+            coefficients: N::unpack(v),
+            phantom_data: PhantomData,
+        }
+    }
+
+    pub fn compress(&self) -> PolyCompressed<N, R> {
+        PolyCompressed {
+            coefficients: N::compress(&self.coefficients),
+            phantom_data: PhantomData,
+        }
+    }
+
+    pub fn decompress(v: &PolyCompressed<N, R>) -> Self {
+        Poly {
+            coefficients: N::decompress(&v.coefficients),
+            phantom_data: PhantomData,
+        }
+    }
+}
+
 impl<'a, 'b, N, R> Add<&'b Poly<N, R>> for &'a Poly<N, R>
 where
-    N: Mul<U8> + Unsigned,
-    <N as Mul<U8>>::Output: ArrayLength<Coefficient>,
+    N: Packable + Compressible<PolyLength = <N as Packable>::PolyLength> + Unsigned,
     R: Bit,
 {
     type Output = Poly<N, R>;
@@ -266,8 +345,7 @@ where
 
 impl<'a, 'b, N, R> Sub<&'b Poly<N, R>> for &'a Poly<N, R>
 where
-    N: Mul<U8> + Unsigned,
-    <N as Mul<U8>>::Output: ArrayLength<Coefficient>,
+    N: Packable + Compressible<PolyLength = <N as Packable>::PolyLength> + Unsigned,
     R: Bit,
 {
     type Output = Poly<N, R>;
@@ -288,8 +366,7 @@ where
 
 impl<'a, 'b, N, R> Mul<&'b Poly<N, R>> for &'a Poly<N, R>
 where
-    N: Mul<U8> + Unsigned,
-    <N as Mul<U8>>::Output: ArrayLength<Coefficient>,
+    N: Packable + Compressible<PolyLength = <N as Packable>::PolyLength> + Unsigned,
     R: Bit,
 {
     type Output = Poly<N, R>;

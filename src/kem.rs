@@ -1,22 +1,13 @@
 use super::{
     message::Message,
-    coefficient::Coefficient,
-    poly::{Poly, PolyCompressed, Ntt},
+    poly::{Poly, PolyCompressed, Packable, Compressible, FromSeed, Ntt},
 };
-use core::{
-    fmt,
-    ops::Mul,
-};
-use generic_array::{ArrayLength, typenum::{Unsigned, B0, B1, U3, U8, U14}};
+use core::fmt;
+use generic_array::typenum::{Unsigned, B0, B1};
 
 pub struct PublicKeyCpa<N>
 where
-    N: Mul<U8> + Mul<U3> + Mul<U14> + Unsigned,
-    <N as Mul<U8>>::Output: ArrayLength<Coefficient>,
-    <N as Mul<U3>>::Output: ArrayLength<u8>,
-    <N as Mul<U14>>::Output: ArrayLength<u8>,
-    Poly<N, B1>: Ntt<Output = Poly<N, B0>>,
-    Poly<N, B0>: Ntt<Output = Poly<N, B1>>,
+    N: Packable + Compressible<PolyLength = <N as Packable>::PolyLength> + Unsigned,
 {
     b_hat: Poly<N, B0>,
     seed: Message,
@@ -24,40 +15,24 @@ where
 
 pub struct SecretKeyCpa<N>
 where
-    N: Mul<U8> + Mul<U3> + Mul<U14> + Unsigned,
-    <N as Mul<U8>>::Output: ArrayLength<Coefficient>,
-    <N as Mul<U3>>::Output: ArrayLength<u8>,
-    <N as Mul<U14>>::Output: ArrayLength<u8>,
-    Poly<N, B1>: Ntt<Output = Poly<N, B0>>,
-    Poly<N, B0>: Ntt<Output = Poly<N, B1>>,
+    N: Packable + Compressible<PolyLength = <N as Packable>::PolyLength> + Unsigned,
 {
     s_hat: Poly<N, B0>,
 }
 
 pub struct CipherTextCpa<N>
 where
-    N: Mul<U8> + Mul<U3> + Mul<U14> + Unsigned,
-    <N as Mul<U8>>::Output: ArrayLength<Coefficient>,
-    <N as Mul<U3>>::Output: ArrayLength<u8>,
-    <N as Mul<U14>>::Output: ArrayLength<u8>,
-    Poly<N, B1>: Ntt<Output = Poly<N, B0>>,
-    Poly<N, B0>: Ntt<Output = Poly<N, B1>>,
+    N: Packable + Compressible<PolyLength = <N as Packable>::PolyLength> + Unsigned,
 {
     u_hat: Poly<N, B0>,
     v_prime: PolyCompressed<N, B0>,
 }
 
-#[derive(Default, Eq, PartialEq, Debug)]
-pub struct SharedSecretCpa(pub Message);
-
 impl<N> PublicKeyCpa<N>
 where
-    N: Mul<U8> + Mul<U3> + Mul<U14> + Unsigned,
-    <N as Mul<U8>>::Output: ArrayLength<Coefficient>,
-    <N as Mul<U3>>::Output: ArrayLength<u8>,
-    <N as Mul<U14>>::Output: ArrayLength<u8>,
+    N: Packable + Compressible<PolyLength = <N as Packable>::PolyLength> + Unsigned,
+    Poly<N, B0>: FromSeed + Ntt<Output = Poly<N, B1>>,
     Poly<N, B1>: Ntt<Output = Poly<N, B0>>,
-    Poly<N, B0>: Ntt<Output = Poly<N, B1>>,
 {
     pub fn generate(seed: Message) -> (Self, SecretKeyCpa<N>) {
         let (public_seed, noise_seed) = seed.expand(1);
@@ -76,7 +51,7 @@ where
         )
     }
 
-    pub fn encapsulate(&self, seed: Message) -> (CipherTextCpa<N>, SharedSecretCpa) {
+    pub fn encapsulate(&self, seed: Message) -> (CipherTextCpa<N>, Message) {
         let (message, noise_seed) = seed.expand(2);
 
         let v = Poly::<N, B0>::from_message(&message);
@@ -93,38 +68,32 @@ where
                 u_hat: u_hat,
                 v_prime: v_prime.compress(),
             },
-            SharedSecretCpa(message.hash()),
+            message.hash(),
         )
     }
 }
 
 impl<N> SecretKeyCpa<N>
 where
-    N: Mul<U8> + Mul<U3> + Mul<U14> + Unsigned,
-    <N as Mul<U8>>::Output: ArrayLength<Coefficient>,
-    <N as Mul<U3>>::Output: ArrayLength<u8>,
-    <N as Mul<U14>>::Output: ArrayLength<u8>,
+    N: Packable + Compressible<PolyLength = <N as Packable>::PolyLength> + Unsigned,
+    Poly<N, B0>: FromSeed + Ntt<Output = Poly<N, B1>>,
     Poly<N, B1>: Ntt<Output = Poly<N, B0>>,
-    Poly<N, B0>: Ntt<Output = Poly<N, B1>>,
 {
-    pub fn decapsulate(&self, cipher_text: &CipherTextCpa<N>) -> SharedSecretCpa {
+    pub fn decapsulate(&self, cipher_text: &CipherTextCpa<N>) -> Message {
         let v_prime = Poly::decompress(&cipher_text.v_prime);
         let temp = &(&self.s_hat * &cipher_text.u_hat).reverse_bits().inv_ntt() - &v_prime;
-        SharedSecretCpa(temp.to_message().hash())
+        temp.to_message().hash()
     }
 }
 
 impl<N> fmt::Debug for PublicKeyCpa<N>
 where
-    N: Mul<U8> + Mul<U3> + Mul<U14> + Unsigned,
-    <N as Mul<U8>>::Output: ArrayLength<Coefficient>,
-    <N as Mul<U3>>::Output: ArrayLength<u8>,
-    <N as Mul<U14>>::Output: ArrayLength<u8>,
+    N: Packable + Compressible<PolyLength = <N as Packable>::PolyLength> + Unsigned,
     Poly<N, B1>: Ntt<Output = Poly<N, B0>>,
     Poly<N, B0>: Ntt<Output = Poly<N, B1>>,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let poly = hex::encode(self.b_hat.bytes());
+        let poly = hex::encode(self.b_hat.pack());
         let seed = hex::encode(self.seed.0);
 
         f.debug_tuple("PublicKeyCpa")
