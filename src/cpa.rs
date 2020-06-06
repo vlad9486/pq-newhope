@@ -1,7 +1,7 @@
 use super::{
     traits::Kem,
     hash,
-    poly::{Poly, Packable, Compressible, FromSeed, Ntt},
+    pke::{Poly, Packable, FromSeed, Ntt},
 };
 use core::marker::PhantomData;
 use generic_array::{
@@ -12,12 +12,12 @@ use rac::LineValid;
 
 pub struct Cpa<N>(PhantomData<N>)
 where
-    N: Packable + Compressible<PolyLength = <N as Packable>::PolyLength>;
+    N: Packable;
 
 #[derive(Clone)]
 pub struct PublicKeyCpa<N>
 where
-    N: Packable + Compressible<PolyLength = <N as Packable>::PolyLength>,
+    N: Packable,
 {
     b_hat: Poly<N, B0>,
     seed: GenericArray<u8, U32>,
@@ -26,7 +26,7 @@ where
 #[derive(Clone)]
 pub struct SecretKeyCpa<N>
 where
-    N: Packable + Compressible<PolyLength = <N as Packable>::PolyLength>,
+    N: Packable,
 {
     s_hat: Poly<N, B0>,
 }
@@ -34,15 +34,15 @@ where
 #[derive(Clone)]
 pub struct CipherTextCpa<N>
 where
-    N: Packable + Compressible<PolyLength = <N as Packable>::PolyLength>,
+    N: Packable,
 {
     u_hat: Poly<N, B0>,
-    v_prime: GenericArray<u8, <N as Compressible>::CompressedLength>,
+    v_prime: GenericArray<u8, N::CompressedLength>,
 }
 
 impl<N> Kem for Cpa<N>
 where
-    N: Packable + Compressible<PolyLength = <N as Packable>::PolyLength> + Unsigned,
+    N: Packable + Unsigned,
     PublicKeyCpa<N>: LineValid,
     SecretKeyCpa<N>: LineValid,
     CipherTextCpa<N>: LineValid,
@@ -64,8 +64,7 @@ where
         let a_hat = Poly::random(&public_seed);
         let s_hat = Poly::<_, B1>::random_small(&noise_seed, 0).ntt();
         let e_hat = Poly::<_, B1>::random_small(&noise_seed, 1).ntt();
-
-        let b_hat = &e_hat + &(&a_hat * &s_hat);
+        let b_hat = Poly::functor_3(&e_hat, &a_hat, &s_hat, |e, a, s| e + &(a * s));
         (
             PublicKeyCpa {
                 b_hat: b_hat,
@@ -87,9 +86,10 @@ where
         let e_prime = Poly::<_, B1>::random_small(&noise_seed, 1).ntt();
         let e_prime_prime = Poly::random_small(&noise_seed, 2);
 
-        let u_hat = &e_prime + &(&a_hat * &s_prime);
-        let temp = (&public_key.b_hat * &s_prime).reverse_bits().inv_ntt();
-        let v_prime = &(&(&temp + &e_prime_prime) + &v);
+        let u_hat = Poly::functor_3(&e_prime, &a_hat, &s_prime, |e, a, s| e + &(a * s));
+        let temp = Poly::functor_2(&public_key.b_hat, &s_prime, |b, s| b * s);
+        let temp = temp.reverse_bits().inv_ntt();
+        let v_prime = Poly::functor_3(&temp, &e_prime_prime, &v, |t, e, v| t + &(e + v));
         let mut shared_secret = GenericArray::default();
         hash::shake256(message.as_ref(), shared_secret.as_mut());
         (
@@ -106,10 +106,9 @@ where
         cipher_text: &Self::CipherText,
     ) -> GenericArray<u8, Self::SharedSecretLength> {
         let v_prime = Poly::decompress(&cipher_text.v_prime);
-        let temp = (&secret_key.s_hat * &cipher_text.u_hat)
-            .reverse_bits()
-            .inv_ntt();
-        let v = &temp - &v_prime;
+        let temp = Poly::functor_2(&cipher_text.u_hat, &secret_key.s_hat, |u, s| u * s);
+        let temp = temp.reverse_bits().inv_ntt();
+        let v = Poly::functor_2(&temp, &v_prime, |t, v| t - v);
         let mut shared_secret = GenericArray::default();
         hash::shake256(v.to_message_negate().as_ref(), shared_secret.as_mut());
         shared_secret
@@ -117,32 +116,29 @@ where
 }
 
 mod proofs {
-    use super::{Poly, Packable, Compressible, PublicKeyCpa, SecretKeyCpa, CipherTextCpa};
+    use super::{Poly, Packable, PublicKeyCpa, SecretKeyCpa, CipherTextCpa};
     use generic_array::{
         GenericArray,
         typenum::{Unsigned, U32},
     };
     use rac::{LineValid, Line, Concat};
-    
-    type PublicKeyCpaBytes<N> = 
+
+    type PublicKeyCpaBytes<N> =
         Concat<GenericArray<u8, <N as Packable>::PackedLength>, GenericArray<u8, U32>>;
 
     impl<N> LineValid for PublicKeyCpa<N>
     where
-        N: Packable + Compressible<PolyLength = <N as Packable>::PolyLength> + Unsigned,
+        N: Packable + Unsigned,
         PublicKeyCpaBytes<N>: Line,
     {
         type Length = <PublicKeyCpaBytes<N> as LineValid>::Length;
 
         fn try_clone_array(a: &GenericArray<u8, Self::Length>) -> Result<Self, ()> {
             let Concat(b_hat_bytes, seed) = <PublicKeyCpaBytes<N> as Line>::clone_array(a);
-            Poly::unpack(&b_hat_bytes)
-                .map(|b_hat| {
-                    PublicKeyCpa {
-                        b_hat: b_hat,
-                        seed: seed,
-                    }
-                })
+            Poly::unpack(&b_hat_bytes).map(|b_hat| PublicKeyCpa {
+                b_hat: b_hat,
+                seed: seed,
+            })
         }
 
         fn clone_line(&self) -> GenericArray<u8, Self::Length> {
@@ -154,17 +150,12 @@ mod proofs {
 
     impl<N> LineValid for SecretKeyCpa<N>
     where
-        N: Packable + Compressible<PolyLength = <N as Packable>::PolyLength> + Unsigned,
+        N: Packable + Unsigned,
     {
         type Length = <N as Packable>::PackedLength;
 
         fn try_clone_array(a: &GenericArray<u8, Self::Length>) -> Result<Self, ()> {
-            Poly::unpack(&GenericArray::clone_array(a))
-                .map(|s_hat| {
-                    SecretKeyCpa {
-                        s_hat: s_hat,
-                    }
-                })
+            Poly::unpack(&GenericArray::clone_array(a)).map(|s_hat| SecretKeyCpa { s_hat: s_hat })
         }
 
         fn clone_line(&self) -> GenericArray<u8, Self::Length> {
@@ -172,28 +163,24 @@ mod proofs {
         }
     }
 
-    type CipherTextCpaBytes<N> = 
-        Concat<
-            GenericArray<u8, <N as Packable>::PackedLength>,
-            GenericArray<u8, <N as Compressible>::CompressedLength>,
-        >;
+    type CipherTextCpaBytes<N> = Concat<
+        GenericArray<u8, <N as Packable>::PackedLength>,
+        GenericArray<u8, <N as Packable>::CompressedLength>,
+    >;
 
     impl<N> LineValid for CipherTextCpa<N>
     where
-        N: Packable + Compressible<PolyLength = <N as Packable>::PolyLength> + Unsigned,
+        N: Packable + Unsigned,
         CipherTextCpaBytes<N>: Line,
     {
         type Length = <CipherTextCpaBytes<N> as LineValid>::Length;
 
         fn try_clone_array(a: &GenericArray<u8, Self::Length>) -> Result<Self, ()> {
             let Concat(u_hat_bytes, v_prime) = <CipherTextCpaBytes<N> as Line>::clone_array(a);
-            Poly::unpack(&u_hat_bytes)
-                .map(|u_hat| {
-                    CipherTextCpa {
-                        u_hat: u_hat,
-                        v_prime: v_prime,
-                    }
-                })
+            Poly::unpack(&u_hat_bytes).map(|u_hat| CipherTextCpa {
+                u_hat: u_hat,
+                v_prime: v_prime,
+            })
         }
 
         fn clone_line(&self) -> GenericArray<u8, Self::Length> {

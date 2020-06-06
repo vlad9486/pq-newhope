@@ -1,7 +1,7 @@
 use super::{
     traits::Kem,
     hash,
-    poly::{Packable, Compressible},
+    pke::Packable,
     cpa::{Cpa, PublicKeyCpa, SecretKeyCpa, CipherTextCpa},
 };
 use core::marker::PhantomData;
@@ -13,12 +13,12 @@ use rac::{LineValid, Line, Concat};
 
 pub struct Cca<N>(PhantomData<N>)
 where
-    N: Packable + Compressible<PolyLength = <N as Packable>::PolyLength>;
+    N: Packable;
 
 #[derive(Clone)]
 pub struct PublicKeyCca<N>
 where
-    N: Packable + Compressible<PolyLength = <N as Packable>::PolyLength>,
+    N: Packable,
 {
     pub(crate) inner: PublicKeyCpa<N>,
 }
@@ -26,7 +26,7 @@ where
 #[derive(Clone)]
 pub struct SecretKeyCca<N>
 where
-    N: Packable + Compressible<PolyLength = <N as Packable>::PolyLength>,
+    N: Packable,
 {
     pub(crate) inner: SecretKeyCpa<N>,
     pub(crate) public_key: PublicKeyCpa<N>,
@@ -37,18 +37,18 @@ where
 #[derive(Clone)]
 pub struct CipherTextCca<N>
 where
-    N: Packable + Compressible<PolyLength = <N as Packable>::PolyLength>,
+    N: Packable,
 {
     pub(crate) inner: CipherTextCpa<N>,
     pub(crate) h: GenericArray<u8, U32>,
 }
 
-type GenerateSeed<N> = 
+type GenerateSeed<N> =
     Concat<GenericArray<u8, <Cpa<N> as Kem>::GenerateSeedLength>, GenericArray<u8, U32>>;
 
 impl<N> Kem for Cca<N>
 where
-    N: Packable + Compressible<PolyLength = <N as Packable>::PolyLength> + Unsigned,
+    N: Packable + Unsigned,
     Cpa<N>: Kem<PublicKey = PublicKeyCpa<N>, SecretKey = SecretKeyCpa<N>>,
     GenerateSeed<N>: Line,
     PublicKeyCpa<N>: LineValid,
@@ -81,7 +81,7 @@ where
                 public_key: public_key_cpa,
                 public_key_hash: public_key_hash,
                 reject: reject,
-            }
+            },
         )
     }
 
@@ -118,9 +118,10 @@ where
 }
 
 mod proofs {
+    #[rustfmt::skip]
     use super::{
         hash,
-        Packable, Compressible,
+        Packable,
         PublicKeyCpa, SecretKeyCpa, CipherTextCpa,
         PublicKeyCca, SecretKeyCca, CipherTextCca,
     };
@@ -129,90 +130,83 @@ mod proofs {
         typenum::{Unsigned, U32},
     };
     use rac::{LineValid, Concat};
-    
+
     impl<N> LineValid for PublicKeyCca<N>
     where
-        N: Packable + Compressible<PolyLength = <N as Packable>::PolyLength>,
+        N: Packable,
         PublicKeyCpa<N>: LineValid,
     {
         type Length = <PublicKeyCpa<N> as LineValid>::Length;
-    
+
         fn try_clone_array(a: &GenericArray<u8, Self::Length>) -> Result<Self, ()> {
-            PublicKeyCpa::try_clone_array(a).map(|pk_cpa| {
-                PublicKeyCca {
-                    inner: pk_cpa,
-                }
-            })
+            PublicKeyCpa::try_clone_array(a).map(|pk_cpa| PublicKeyCca { inner: pk_cpa })
         }
-    
+
         fn clone_line(&self) -> GenericArray<u8, Self::Length> {
             self.inner.clone_line()
         }
     }
-    
-    type SecretKeyCpaPublicKeyCpaBytes<N> = Concat<
-        SecretKeyCpa<N>,
-        GenericArray<u8, <PublicKeyCpa<N> as LineValid>::Length>,
-    >;
+
+    type SecretKeyCpaPublicKeyCpaBytes<N> =
+        Concat<SecretKeyCpa<N>, GenericArray<u8, <PublicKeyCpa<N> as LineValid>::Length>>;
 
     type SecretKeyCcaLineValid<N> = Concat<SecretKeyCpaPublicKeyCpaBytes<N>, GenericArray<u8, U32>>;
-    
+
     impl<N> LineValid for SecretKeyCca<N>
     where
-        N: Packable + Compressible<PolyLength = <N as Packable>::PolyLength> + Unsigned,
+        N: Packable + Unsigned,
         SecretKeyCpa<N>: LineValid,
         PublicKeyCpa<N>: LineValid,
         SecretKeyCpaPublicKeyCpaBytes<N>: LineValid,
         SecretKeyCcaLineValid<N>: LineValid,
     {
         type Length = <SecretKeyCcaLineValid<N> as LineValid>::Length;
-    
+
         fn try_clone_array(a: &GenericArray<u8, Self::Length>) -> Result<Self, ()> {
-            SecretKeyCcaLineValid::<N>::try_clone_array(a)
-                .and_then(|Concat(Concat(secret_key_cpa, public_key_cpa_array), reject)| {
+            SecretKeyCcaLineValid::<N>::try_clone_array(a).and_then(
+                |Concat(Concat(secret_key_cpa, public_key_cpa_array), reject)| {
                     let mut public_key_cpa_bytes_hash = GenericArray::default();
                     hash::shake256(
                         public_key_cpa_array.as_ref(),
                         public_key_cpa_bytes_hash.as_mut(),
                     );
-                    LineValid::try_clone_array(&public_key_cpa_array)
-                        .map(|public_key| {
-                            SecretKeyCca {
-                                inner: secret_key_cpa,
-                                public_key: public_key,
-                                public_key_hash: public_key_cpa_bytes_hash,
-                                reject: reject,
-                            }
-                        })
-                })
+                    LineValid::try_clone_array(&public_key_cpa_array).map(|public_key| {
+                        SecretKeyCca {
+                            inner: secret_key_cpa,
+                            public_key: public_key,
+                            public_key_hash: public_key_cpa_bytes_hash,
+                            reject: reject,
+                        }
+                    })
+                },
+            )
         }
-    
+
         fn clone_line(&self) -> GenericArray<u8, Self::Length> {
             let public_key_cpa_bytes = self.public_key.clone_line();
-            Concat(Concat(self.inner.clone(), public_key_cpa_bytes), self.reject.clone()).clone_line()
+            Concat(
+                Concat(self.inner.clone(), public_key_cpa_bytes),
+                self.reject.clone(),
+            )
+            .clone_line()
         }
     }
-    
+
     type CipherTextCcaLineValid<N> = Concat<CipherTextCpa<N>, GenericArray<u8, U32>>;
-    
+
     impl<N> LineValid for CipherTextCca<N>
     where
-        N: Packable + Compressible<PolyLength = <N as Packable>::PolyLength> + Unsigned,
+        N: Packable + Unsigned,
         CipherTextCpa<N>: LineValid,
         CipherTextCcaLineValid<N>: LineValid,
     {
         type Length = <CipherTextCcaLineValid<N> as LineValid>::Length;
-    
+
         fn try_clone_array(a: &GenericArray<u8, Self::Length>) -> Result<Self, ()> {
             CipherTextCcaLineValid::<N>::try_clone_array(a)
-                .map(|Concat(inner, h)| {
-                    CipherTextCca {
-                        inner: inner,
-                        h: h,
-                    }
-                })
+                .map(|Concat(inner, h)| CipherTextCca { inner: inner, h: h })
         }
-    
+
         fn clone_line(&self) -> GenericArray<u8, Self::Length> {
             Concat(self.inner.clone(), self.h.clone()).clone_line()
         }

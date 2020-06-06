@@ -1,7 +1,4 @@
-use core::{
-    ops::{Add, Sub, Mul},
-    num::Wrapping,
-};
+use core::ops::{Add, Sub, Mul};
 
 #[derive(Clone, Default)]
 pub struct Coefficient(u16);
@@ -53,6 +50,8 @@ impl Coefficient {
     }
 
     pub fn montgomery_reduce(x: u32) -> Self {
+        use core::num::Wrapping;
+
         let Wrapping(u) = Wrapping(x) * Wrapping(Self::Q_INV as u32);
         let u = (u & ((1 << Self::R_LOG) - 1)) * (Self::Q as u32);
         Self::new(((x + u) >> Self::R_LOG) as u16)
