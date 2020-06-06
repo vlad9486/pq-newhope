@@ -1,5 +1,5 @@
 use super::{
-    kem::Kem,
+    traits::Kem,
     hash,
     poly::{Poly, Packable, Compressible, FromSeed, Ntt},
 };

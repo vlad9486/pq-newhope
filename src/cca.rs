@@ -1,5 +1,5 @@
 use super::{
-    kem::Kem,
+    traits::Kem,
     hash,
     poly::{Packable, Compressible},
     cpa::{Cpa, PublicKeyCpa, SecretKeyCpa, CipherTextCpa},
