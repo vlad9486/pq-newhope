@@ -1,9 +1,10 @@
 use generic_array::{ArrayLength, GenericArray};
+use rac::LineValid;
 
 pub trait Kem {
-    type PublicKey: Sized;
-    type SecretKey: Sized;
-    type CipherText: Sized;
+    type PublicKey: Sized + LineValid;
+    type SecretKey: Sized + LineValid;
+    type CipherText: Sized + LineValid;
     type SharedSecretLength: ArrayLength<u8>;
     type GenerateSeedLength: ArrayLength<u8>;
     type EncapsulateSeedLength: ArrayLength<u8>;

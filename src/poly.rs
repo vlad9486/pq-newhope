@@ -19,7 +19,7 @@ pub trait Packable {
 
     fn unpack(
         v: &GenericArray<u8, Self::PackedLength>,
-    ) -> GenericArray<Coefficient, Self::PolyLength>;
+    ) -> Result<GenericArray<Coefficient, Self::PolyLength>, ()>;
 }
 
 pub trait Compressible {
@@ -49,15 +49,6 @@ where
     R: Bit,
 {
     coefficients: GenericArray<Coefficient, <N as Compressible>::PolyLength>,
-    phantom_data: PhantomData<R>,
-}
-
-pub struct PolyCompressed<N, R>
-where
-    N: Packable + Compressible<PolyLength = <N as Packable>::PolyLength>,
-    R: Bit,
-{
-    coefficients: GenericArray<u8, <N as Compressible>::CompressedLength>,
     phantom_data: PhantomData<R>,
 }
 
@@ -96,20 +87,20 @@ where
 
     fn unpack(
         v: &GenericArray<u8, Self::PackedLength>,
-    ) -> GenericArray<Coefficient, Self::PolyLength> {
+    ) -> Result<GenericArray<Coefficient, Self::PolyLength>, ()> {
         let mut c = GenericArray::default();
 
         for i in 0..(N::USIZE * 2) {
             let a = |j| v[7 * i + j] as u16;
             let c = &mut c[(4 * i)..(4 * (i + 1))];
 
-            c[0] = Coefficient::new((0x00 >> 0x8) | (a(0) << 0x0) | ((a(1) & 0x3f) << 0x8));
-            c[1] = Coefficient::new((a(1) >> 0x6) | (a(2) << 0x2) | ((a(3) & 0x0f) << 0xa));
-            c[2] = Coefficient::new((a(3) >> 0x4) | (a(4) << 0x4) | ((a(5) & 0x03) << 0xc));
-            c[3] = Coefficient::new((a(5) >> 0x2) | (a(6) << 0x6) | ((0x00 & 0x00) << 0xe));
+            c[0] = Coefficient::valid_new((0x00 >> 0x8) | (a(0) << 0x0) | ((a(1) & 0x3f) << 0x8))?;
+            c[1] = Coefficient::valid_new((a(1) >> 0x6) | (a(2) << 0x2) | ((a(3) & 0x0f) << 0xa))?;
+            c[2] = Coefficient::valid_new((a(3) >> 0x4) | (a(4) << 0x4) | ((a(5) & 0x03) << 0xc))?;
+            c[3] = Coefficient::valid_new((a(5) >> 0x2) | (a(6) << 0x6) | ((0x00 & 0x00) << 0xe))?;
         }
 
-        c
+        Ok(c)
     }
 }
 
@@ -294,23 +285,23 @@ where
         N::pack(&self.coefficients)
     }
 
-    pub fn unpack(v: &GenericArray<u8, N::PackedLength>) -> Self {
-        Poly {
-            coefficients: N::unpack(v),
-            phantom_data: PhantomData,
-        }
+    pub fn unpack(v: &GenericArray<u8, N::PackedLength>) -> Result<Self, ()> {
+        N::unpack(v)
+            .map(|v| {
+                Poly {
+                    coefficients: v,
+                    phantom_data: PhantomData,
+                }
+            })
     }
 
-    pub fn compress(&self) -> PolyCompressed<N, R> {
-        PolyCompressed {
-            coefficients: N::compress(&self.coefficients),
-            phantom_data: PhantomData,
-        }
+    pub fn compress(&self) -> GenericArray<u8, <N as Compressible>::CompressedLength> {
+        N::compress(&self.coefficients)
     }
 
-    pub fn decompress(v: &PolyCompressed<N, R>) -> Self {
+    pub fn decompress(v: &GenericArray<u8, <N as Compressible>::CompressedLength>) -> Self {
         Poly {
-            coefficients: N::decompress(&v.coefficients),
+            coefficients: N::decompress(v),
             phantom_data: PhantomData,
         }
     }

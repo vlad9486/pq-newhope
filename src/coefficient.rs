@@ -26,6 +26,14 @@ impl Coefficient {
         Coefficient(r)
     }
 
+    pub fn valid_new(r: u16) -> Result<Self, ()> {
+        if r < Self::Q {
+            Ok(Self::new(r))
+        } else {
+            Err(())
+        }
+    }
+
     pub fn try_new(r: u16) -> Option<Self> {
         if r < (core::u16::MAX / Self::Q) * Self::Q {
             Some(Self::new(r))
