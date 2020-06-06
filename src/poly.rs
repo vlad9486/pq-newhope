@@ -43,6 +43,7 @@ pub trait FromSeed {
     fn sample(seed: &[u8; 32], nonce: u8) -> Self;
 }
 
+#[derive(Clone)]
 pub struct Poly<N, R>
 where
     N: Packable + Compressible<PolyLength = <N as Packable>::PolyLength>,

@@ -1,9 +1,14 @@
-use crate::{Kem, Cpa};
+use crate::{Kem, Cpa, Cca};
 use generic_array::{GenericArray, sequence::GenericSequence, typenum::U128};
 
 #[test]
 fn cpa() {
     generic::<Cpa<U128>>()
+}
+
+#[test]
+fn cca() {
+    generic::<Cca<U128>>()
 }
 
 fn generic<K>()
