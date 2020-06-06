@@ -61,9 +61,9 @@ where
     ) -> (Self::PublicKey, Self::SecretKey) {
         let (public_seed, noise_seed) = hash::expand(seed.as_ref(), 1);
 
-        let a_hat = Poly::uniform(&public_seed);
-        let s_hat = Poly::<_, B1>::sample(&noise_seed, 0).ntt();
-        let e_hat = Poly::<_, B1>::sample(&noise_seed, 1).ntt();
+        let a_hat = Poly::random(&public_seed);
+        let s_hat = Poly::<_, B1>::random_small(&noise_seed, 0).ntt();
+        let e_hat = Poly::<_, B1>::random_small(&noise_seed, 1).ntt();
 
         let b_hat = &e_hat + &(&a_hat * &s_hat);
         (
@@ -82,10 +82,10 @@ where
         let (message, noise_seed) = hash::expand(seed.as_ref(), 2);
 
         let v = Poly::<N, B0>::from_message(&message);
-        let a_hat = Poly::uniform(&public_key.seed.into());
-        let s_prime = Poly::<_, B1>::sample(&noise_seed, 0).ntt();
-        let e_prime = Poly::<_, B1>::sample(&noise_seed, 1).ntt();
-        let e_prime_prime = Poly::sample(&noise_seed, 2);
+        let a_hat = Poly::random(&public_key.seed.into());
+        let s_prime = Poly::<_, B1>::random_small(&noise_seed, 0).ntt();
+        let e_prime = Poly::<_, B1>::random_small(&noise_seed, 1).ntt();
+        let e_prime_prime = Poly::random_small(&noise_seed, 2);
 
         let u_hat = &e_prime + &(&a_hat * &s_prime);
         let temp = (&public_key.b_hat * &s_prime).reverse_bits().inv_ntt();
@@ -109,9 +109,9 @@ where
         let temp = (&secret_key.s_hat * &cipher_text.u_hat)
             .reverse_bits()
             .inv_ntt();
-        let temp = &temp - &v_prime;
+        let v = &temp - &v_prime;
         let mut shared_secret = GenericArray::default();
-        hash::shake256(temp.to_message().as_ref(), shared_secret.as_mut());
+        hash::shake256(v.to_message_negate().as_ref(), shared_secret.as_mut());
         shared_secret
     }
 }

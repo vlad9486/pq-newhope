@@ -1,4 +1,5 @@
-use super::{hash, coefficient::Coefficient};
+use super::coefficient::Coefficient;
+use crate::hash;
 use core::{
     marker::PhantomData,
     ops::{Mul, Add, Sub, BitXor},
@@ -38,9 +39,9 @@ pub trait Compressible {
 
 pub trait FromSeed {
     fn from_message(message: &[u8; 32]) -> Self;
-    fn to_message(&self) -> [u8; 32];
-    fn uniform(seed: &[u8; 32]) -> Self;
-    fn sample(seed: &[u8; 32], nonce: u8) -> Self;
+    fn to_message_negate(&self) -> [u8; 32];
+    fn random(seed: &[u8; 32]) -> Self;
+    fn random_small(seed: &[u8; 32], nonce: u8) -> Self;
 }
 
 #[derive(Clone)]
@@ -180,7 +181,7 @@ where
         }
     }
 
-    fn to_message(&self) -> [u8; 32] {
+    fn to_message_negate(&self) -> [u8; 32] {
         const BITS: usize = 256;
         let coefficients = N::USIZE * 8;
         let mut t = [0; BITS];
@@ -199,7 +200,7 @@ where
         message
     }
 
-    fn uniform(seed: &[u8; 32]) -> Self {
+    fn random(seed: &[u8; 32]) -> Self {
         use sha3::{
             Shake128,
             digest::{Input, ExtendableOutput, XofReader},
@@ -238,7 +239,7 @@ where
         }
     }
 
-    fn sample(seed: &[u8; 32], nonce: u8) -> Self {
+    fn random_small(seed: &[u8; 32], nonce: u8) -> Self {
         let mut c = GenericArray::default();
 
         let mut ext_seed = [0; 34];

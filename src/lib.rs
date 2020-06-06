@@ -5,9 +5,7 @@
 extern crate std;
 
 mod hash;
-mod coefficient;
 mod poly;
-mod tables;
 
 mod traits;
 mod pke;
