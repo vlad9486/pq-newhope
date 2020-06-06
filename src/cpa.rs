@@ -19,7 +19,7 @@ where
     N: Packable + Compressible<PolyLength = <N as Packable>::PolyLength>,
 {
     b_hat: Poly<N, B0>,
-    seed: [u8; 32],
+    seed: GenericArray<u8, U32>,
 }
 
 type PublicKeyCpaBytes<N> = 
@@ -38,14 +38,14 @@ where
             .map(|b_hat| {
                 PublicKeyCpa {
                     b_hat: b_hat,
-                    seed: seed.into(),
+                    seed: seed,
                 }
             })
     }
 
     fn clone_line(&self) -> GenericArray<u8, Self::Length> {
         let b_hat_bytes = self.b_hat.pack();
-        let seed = self.seed.into();
+        let seed = self.seed.clone();
         Concat(b_hat_bytes, seed).clone_line()
     }
 }
@@ -144,7 +144,7 @@ where
         (
             PublicKeyCpa {
                 b_hat: b_hat,
-                seed: public_seed,
+                seed: public_seed.into(),
             },
             SecretKeyCpa { s_hat: s_hat },
         )
@@ -157,7 +157,7 @@ where
         let (message, noise_seed) = hash::expand(seed.as_ref(), 2);
 
         let v = Poly::<N, B0>::from_message(&message);
-        let a_hat = Poly::uniform(&public_key.seed);
+        let a_hat = Poly::uniform(&public_key.seed.into());
         let s_prime = Poly::<_, B1>::sample(&noise_seed, 0).ntt();
         let e_prime = Poly::<_, B1>::sample(&noise_seed, 1).ntt();
         let e_prime_prime = Poly::sample(&noise_seed, 2);
