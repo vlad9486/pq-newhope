@@ -1,10 +1,19 @@
 use core::ops::{Add, Sub, Mul};
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct Coefficient(u16);
 
+impl PartialEq for Coefficient {
+    fn eq(&self, other: &Coefficient) -> bool {
+        self.0 % Self::Q == other.0 % Self::Q
+    }
+}
+
+impl Eq for Coefficient {
+}
+
 impl Coefficient {
-    const Q: u16 = 12289;
+    pub const Q: u16 = 12289;
     const Q_INV: u16 = 12287;
     const R_LOG: u32 = 18;
 

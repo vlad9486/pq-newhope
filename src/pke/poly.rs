@@ -129,7 +129,7 @@ where
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub struct Poly<N, R>
 where
     N: Packable,
@@ -321,6 +321,34 @@ where
     R: Bit + BitXor<B1>,
     <R as BitXor<B1>>::Output: Bit + BitXor<B1, Output = R>,
 {
+    #[cfg(feature = "smallest")]
+    pub fn smallest(&self) -> std::vec::Vec<u8> {
+        use num_bigint::ToBigUint;
+
+        let mut q = 0u8.to_biguint().unwrap();
+        for i in 0..1024 {
+            q *= Coefficient::Q;
+            q += self.coefficients[i].freeze() as u16
+        }
+
+        q.to_bytes_le()
+    }
+
+    #[cfg(feature = "smallest")]
+    pub fn from_smallest(v: &[u8]) -> Self {
+        use num_bigint::BigUint;
+        use num_traits::ToPrimitive;
+
+        let mut q = BigUint::from_bytes_le(v);
+        let mut c = GenericArray::default();
+        for i in 0..1024 {
+            c[1023 - i] = Coefficient::new((&q % Coefficient::Q).to_u16().unwrap());
+            q /= Coefficient::Q;
+        }
+
+        Self::new(c)
+    }
+
     fn multiply(self, gammas: &[u16]) -> Self {
         let mut s = self;
 
@@ -391,5 +419,21 @@ where
     fn inv_ntt(self) -> Self::Output {
         self.transform(super::tables::OMEGAS_INV_BITREV_MONTGOMERY.as_ref())
             .multiply(super::tables::GAMMAS_INV_MONTGOMERY.as_ref())
+    }
+}
+
+#[cfg(test)]
+#[cfg(feature = "smallest")]
+mod test {
+    use super::{Poly, FromSeed};
+    use generic_array::typenum::{U128, B0};
+
+    #[test]
+    fn smallest() {
+        let poly = Poly::<U128, B0>::random(&rand::random());
+        let dump = poly.smallest();
+        let poly_new = Poly::<U128, B0>::from_smallest(dump.as_ref());
+        assert_eq!(poly, poly_new);
+        assert!(dump.len() <= 1739);
     }
 }

@@ -2,7 +2,7 @@
 
 pub extern crate generic_array;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "smallest"))]
 #[macro_use]
 extern crate std;
 
