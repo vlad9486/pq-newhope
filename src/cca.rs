@@ -1,15 +1,12 @@
 use super::{
-    traits::Kem,
     hash,
-    pke::Packable,
-    cpa::{Cpa, PublicKeyCpa, SecretKeyCpa, CipherTextCpa},
+    pke::{Packable, Codable, Pke, PublicKey, SecretKey, Parameter},
 };
-use core::marker::PhantomData;
+use core::{marker::PhantomData, ops::Add};
 use generic_array::{
-    GenericArray,
-    typenum::{Unsigned, U32},
+    GenericArray, ArrayLength,
+    typenum::{Unsigned, U32, U64},
 };
-use rac::{LineValid, Line, Concat};
 
 pub struct Cca<N>(PhantomData<N>)
 where
@@ -20,7 +17,9 @@ pub struct PublicKeyCca<N>
 where
     N: Packable,
 {
-    pub(crate) inner: PublicKeyCpa<N>,
+    pk: PublicKey<N>,
+    parameter: Parameter<N>,
+    seed: GenericArray<u8, U32>,
 }
 
 #[derive(Clone)]
@@ -28,10 +27,10 @@ pub struct SecretKeyCca<N>
 where
     N: Packable,
 {
-    pub(crate) inner: SecretKeyCpa<N>,
-    pub(crate) public_key: PublicKeyCpa<N>,
-    pub(crate) public_key_hash: GenericArray<u8, U32>,
-    pub(crate) reject: GenericArray<u8, U32>,
+    sk: SecretKey<N>,
+    pk: PublicKeyCca<N>,
+    pk_hash: GenericArray<u8, U32>,
+    reject: GenericArray<u8, U32>,
 }
 
 #[derive(Clone)]
@@ -39,176 +38,285 @@ pub struct CipherTextCca<N>
 where
     N: Packable,
 {
-    pub(crate) inner: CipherTextCpa<N>,
-    pub(crate) h: GenericArray<u8, U32>,
+    pk: PublicKey<N>,
+    ct: GenericArray<u8, N::CompressedLength>,
+    check: GenericArray<u8, U32>,
 }
 
-type GenerateSeed<N> =
-    Concat<GenericArray<u8, <Cpa<N> as Kem>::GenerateSeedLength>, GenericArray<u8, U32>>;
+type PkLength<N> = <<N as Packable>::PackedLength as Add<U32>>::Output;
+type CtLength<N> = <PkLength<N> as Add<<N as Packable>::CompressedLength>>::Output;
 
-impl<N> Kem for Cca<N>
+impl<N> Cca<N>
 where
     N: Packable + Unsigned,
-    Cpa<N>: Kem<PublicKey = PublicKeyCpa<N>, SecretKey = SecretKeyCpa<N>>,
-    GenerateSeed<N>: Line,
-    PublicKeyCpa<N>: LineValid,
-    SecretKeyCpa<N>: LineValid,
-    PublicKeyCca<N>: LineValid,
-    SecretKeyCca<N>: LineValid,
-    CipherTextCca<N>: LineValid,
+    N::PackedLength: Add<U32> + Unsigned,
+    PkLength<N>: ArrayLength<u8> + Add<N::CompressedLength>,
+    CtLength<N>: ArrayLength<u8>,
+    Parameter<N>: Pke<
+        Seed = U32,
+        GenerationSeed = U32,
+        Plain = U32,
+        Cipher = N::CompressedLength,
+        PublicKey = PublicKey<N>,
+        SecretKey = SecretKey<N>,
+    >,
 {
-    type PublicKey = PublicKeyCca<N>;
-    type SecretKey = SecretKeyCca<N>;
-    type CipherText = CipherTextCca<N>;
-    type SharedSecretLength = U32;
-    type GenerateSeedLength = <GenerateSeed<N> as LineValid>::Length;
-    type EncapsulateSeedLength = U32;
+    fn public_key_hash(pk: &PublicKeyCca<N>) -> GenericArray<u8, U32> {
+        let mut pk_hash = GenericArray::default();
+        let mut pk_bytes = GenericArray::<u8, PkLength<N>>::default();
+        pk.encode(pk_bytes.as_mut());
+        hash::shake256(pk_bytes.as_ref(), pk_hash.as_mut());
+        pk_hash
+    }
 
-    fn generate(
-        seed: GenericArray<u8, Self::GenerateSeedLength>,
-    ) -> (Self::PublicKey, Self::SecretKey) {
-        let Concat(seed, reject) = Line::clone_array(&seed);
-        let (public_key_cpa, secret_key_cpa) = Cpa::<N>::generate(seed);
-        let mut public_key_hash = GenericArray::default();
-        let public_key_bytes = public_key_cpa.clone_line();
-        hash::shake256(public_key_bytes.as_ref(), public_key_hash.as_mut());
+    fn cipher_text_hash(ct: &CipherTextCca<N>) -> GenericArray<u8, U32> {
+        let mut ct_hash = GenericArray::default();
+        let mut ct_bytes = GenericArray::<u8, CtLength<N>>::default();
+        ct.encode(ct_bytes.as_mut());
+        hash::shake256(ct_bytes.as_ref(), ct_hash.as_mut());
+        ct_hash
+    }
+
+    pub fn generate(seed: &GenericArray<u8, U64>) -> (PublicKeyCca<N>, SecretKeyCca<N>) {
+        let mut reject = GenericArray::default();
+        reject.clone_from_slice(seed[..32].as_ref());
+        let mut cpa_seed = GenericArray::default();
+        cpa_seed.clone_from_slice(seed[32..].as_ref());
+        let (parameter_seed, pk_seed) = hash::expand(&cpa_seed, 1);
+        let parameter = Parameter::new(&parameter_seed);
+        let (pk, sk) = parameter.generate(&pk_seed);
+        let public_key = PublicKeyCca {
+            pk: pk,
+            parameter: parameter,
+            seed: parameter_seed,
+        };
+        let pk_hash = Self::public_key_hash(&public_key);
         (
-            PublicKeyCca {
-                inner: public_key_cpa.clone(),
-            },
+            public_key.clone(),
             SecretKeyCca {
-                inner: secret_key_cpa,
-                public_key: public_key_cpa,
-                public_key_hash: public_key_hash,
+                sk: sk,
+                pk: public_key,
+                pk_hash: pk_hash,
                 reject: reject,
             },
         )
     }
 
-    fn encapsulate(
-        public_key: &Self::PublicKey,
-        seed: GenericArray<u8, Self::EncapsulateSeedLength>,
-    ) -> (Self::CipherText, GenericArray<u8, Self::SharedSecretLength>) {
-        let mut data = [0; 0x21];
-        data[0x01] = 0x04;
-        data[0x01..0x21].clone_from_slice(seed.as_ref());
+    pub fn encapsulate(
+        public_key: &PublicKeyCca<N>,
+        seed: &GenericArray<u8, U32>,
+    ) -> (CipherTextCca<N>, GenericArray<u8, U32>) {
+        let mut ext_seed = [0; 0x21];
+        ext_seed[0x00] = 0x04;
+        ext_seed[0x01..0x21].clone_from_slice(seed.as_ref());
 
         let mut new_seed = [0; 0x41];
-        new_seed[0x01] = 0x08;
-        hash::shake256(data.as_ref(), &mut new_seed[0x01..0x21]);
-
-        let mut public_key_hash = [0; 0x20];
-        let public_key_bytes = public_key.inner.clone_line();
-        hash::shake256(public_key_bytes.as_ref(), public_key_hash.as_mut());
+        new_seed[0x00] = 0x08;
+        hash::shake256(ext_seed.as_ref(), &mut new_seed[0x01..0x21]);
+        let public_key_hash = Self::public_key_hash(&public_key);
         new_seed[0x21..0x41].clone_from_slice(public_key_hash.as_ref());
 
         let mut buffer = [0; 0x60];
         hash::shake256(new_seed.as_ref(), buffer.as_mut());
 
-        unimplemented!()
+        let mut encryption_seed = GenericArray::default();
+        encryption_seed.clone_from_slice(buffer[0x20..0x40].as_ref());
+
+        let mut message = GenericArray::default();
+        message.clone_from_slice(new_seed[0x01..0x21].as_ref());
+        let (pk_b, ct) = public_key
+            .parameter
+            .encrypt(&encryption_seed, &public_key.pk, &message);
+
+        let mut hash = GenericArray::default();
+        hash.clone_from_slice(buffer[0x40..].as_ref());
+        let cipher_text = CipherTextCca {
+            pk: pk_b,
+            ct: ct,
+            check: hash,
+        };
+        let ct_hash = Self::cipher_text_hash(&cipher_text);
+        buffer[0x20..0x40].clone_from_slice(ct_hash.as_ref());
+
+        let mut shared_secret = GenericArray::default();
+        hash::shake256(buffer[0x00..0x40].as_ref(), shared_secret.as_mut());
+        (cipher_text, shared_secret)
     }
 
-    fn decapsulate(
-        secret_key: &Self::SecretKey,
-        cipher_text: &Self::CipherText,
-    ) -> GenericArray<u8, Self::SharedSecretLength> {
-        let _ = (secret_key, cipher_text);
-        unimplemented!()
+    pub fn decapsulate(
+        secret_key: &SecretKeyCca<N>,
+        cipher_text: &CipherTextCca<N>,
+    ) -> GenericArray<u8, U32> {
+        #[inline(never)]
+        fn c_cmp(a: &[u8], b: &[u8]) -> u8 {
+            (0..a.len()).fold(0, |r, i| r | (a[i] ^ b[i]))
+        }
+
+        #[inline(never)]
+        fn c_mov(r: &mut [u8], x: &[u8], c: u8) {
+            for i in 0..r.len() {
+                r[i] ^= c & (x[i] ^ r[i]);
+            }
+        }
+
+        let message = Parameter::decrypt(&cipher_text.pk, &secret_key.sk, &cipher_text.ct);
+        let mut new_seed = [0; 0x41];
+        new_seed[0x00] = 0x08;
+        new_seed[0x01..0x21].clone_from_slice(message.as_ref());
+        new_seed[0x21..0x41].clone_from_slice(secret_key.pk_hash.as_ref());
+
+        let mut buffer = [0; 0x60];
+        hash::shake256(new_seed.as_ref(), buffer.as_mut());
+
+        let mut encryption_seed = GenericArray::default();
+        encryption_seed.clone_from_slice(buffer[0x20..0x40].as_ref());
+
+        let (pk_b_cmp, ct_cmp) =
+            secret_key
+                .pk
+                .parameter
+                .encrypt(&encryption_seed, &secret_key.pk.pk, &message);
+
+        let mut hash = GenericArray::default();
+        hash.clone_from_slice(buffer[0x40..].as_ref());
+        let cipher_text_cmp = CipherTextCca {
+            pk: pk_b_cmp,
+            ct: ct_cmp,
+            check: hash,
+        };
+
+        let mut cipher_text_bytes = GenericArray::<u8, CtLength<N>>::default();
+        cipher_text.encode(cipher_text_bytes.as_mut());
+        let mut cipher_text_cmp_bytes = GenericArray::<u8, CtLength<N>>::default();
+        cipher_text_cmp.encode(cipher_text_cmp_bytes.as_mut());
+        let fail = c_cmp(cipher_text_bytes.as_ref(), cipher_text_cmp_bytes.as_ref());
+        let fail = if fail == 0 { 0 } else { 0xff };
+        hash::shake256(cipher_text_bytes.as_ref(), buffer[0x20..0x40].as_mut());
+        c_mov(
+            buffer[0x00..0x20].as_mut(),
+            secret_key.reject.as_ref(),
+            fail,
+        );
+
+        let mut shared_secret = GenericArray::default();
+        hash::shake256(buffer[0x00..0x40].as_ref(), shared_secret.as_mut());
+        shared_secret
     }
 }
 
-mod proofs {
+mod codable {
     #[rustfmt::skip]
     use super::{
-        hash,
-        Packable,
-        PublicKeyCpa, SecretKeyCpa, CipherTextCpa,
-        PublicKeyCca, SecretKeyCca, CipherTextCca,
+        Codable, Packable, Parameter, Pke,
+        PublicKeyCca, PublicKey,
+        SecretKeyCca, SecretKey,
+        CipherTextCca,
     };
     use generic_array::{
         GenericArray,
         typenum::{Unsigned, U32},
     };
-    use rac::{LineValid, Concat};
 
-    impl<N> LineValid for PublicKeyCca<N>
+    impl<N> Codable for PublicKeyCca<N>
     where
         N: Packable,
-        PublicKeyCpa<N>: LineValid,
+        N::PackedLength: Unsigned,
+        Parameter<N>: Pke<Seed = U32>,
+        PublicKey<N>: Codable,
     {
-        type Length = <PublicKeyCpa<N> as LineValid>::Length;
+        const SIZE: usize = PublicKey::<N>::SIZE + 32;
 
-        fn try_clone_array(a: &GenericArray<u8, Self::Length>) -> Result<Self, ()> {
-            PublicKeyCpa::try_clone_array(a).map(|pk_cpa| PublicKeyCca { inner: pk_cpa })
+        fn encode(&self, buffer: &mut [u8]) {
+            let m = <N::PackedLength as Unsigned>::USIZE;
+            self.pk.encode(buffer[..m].as_mut());
+            buffer[m..].clone_from_slice(self.seed.as_ref());
         }
 
-        fn clone_line(&self) -> GenericArray<u8, Self::Length> {
-            self.inner.clone_line()
+        fn decode(buffer: &[u8]) -> Result<Self, ()> {
+            let m = <N::PackedLength as Unsigned>::USIZE;
+            PublicKey::decode(buffer[..m].as_ref()).map(|inner| {
+                let mut seed = GenericArray::default();
+                seed.clone_from_slice(buffer[m..].as_ref());
+                PublicKeyCca {
+                    pk: inner,
+                    parameter: Parameter::new(&seed),
+                    seed: seed,
+                }
+            })
         }
     }
 
-    type SecretKeyCpaPublicKeyCpaBytes<N> =
-        Concat<SecretKeyCpa<N>, GenericArray<u8, <PublicKeyCpa<N> as LineValid>::Length>>;
-
-    type SecretKeyCcaLineValid<N> = Concat<SecretKeyCpaPublicKeyCpaBytes<N>, GenericArray<u8, U32>>;
-
-    impl<N> LineValid for SecretKeyCca<N>
+    impl<N> Codable for SecretKeyCca<N>
     where
-        N: Packable + Unsigned,
-        SecretKeyCpa<N>: LineValid,
-        PublicKeyCpa<N>: LineValid,
-        SecretKeyCpaPublicKeyCpaBytes<N>: LineValid,
-        SecretKeyCcaLineValid<N>: LineValid,
+        N: Packable,
+        N::PackedLength: Unsigned,
+        SecretKey<N>: Codable,
+        PublicKeyCca<N>: Codable,
     {
-        type Length = <SecretKeyCcaLineValid<N> as LineValid>::Length;
+        const SIZE: usize = SecretKey::<N>::SIZE;
 
-        fn try_clone_array(a: &GenericArray<u8, Self::Length>) -> Result<Self, ()> {
-            SecretKeyCcaLineValid::<N>::try_clone_array(a).and_then(
-                |Concat(Concat(secret_key_cpa, public_key_cpa_array), reject)| {
-                    let mut public_key_cpa_bytes_hash = GenericArray::default();
-                    hash::shake256(
-                        public_key_cpa_array.as_ref(),
-                        public_key_cpa_bytes_hash.as_mut(),
-                    );
-                    LineValid::try_clone_array(&public_key_cpa_array).map(|public_key| {
-                        SecretKeyCca {
-                            inner: secret_key_cpa,
-                            public_key: public_key,
-                            public_key_hash: public_key_cpa_bytes_hash,
-                            reject: reject,
-                        }
-                    })
-                },
-            )
+        fn encode(&self, buffer: &mut [u8]) {
+            let m = <N::PackedLength as Unsigned>::USIZE;
+            let n = m + <PublicKeyCca<N> as Codable>::SIZE;
+            let o = n + 32;
+            self.sk.encode(buffer[..m].as_mut());
+            self.pk.encode(buffer[m..n].as_mut());
+            buffer[n..o].clone_from_slice(self.pk_hash.as_ref());
+            buffer[o..].clone_from_slice(self.reject.as_ref());
         }
 
-        fn clone_line(&self) -> GenericArray<u8, Self::Length> {
-            let public_key_cpa_bytes = self.public_key.clone_line();
-            Concat(
-                Concat(self.inner.clone(), public_key_cpa_bytes),
-                self.reject.clone(),
-            )
-            .clone_line()
+        fn decode(buffer: &[u8]) -> Result<Self, ()> {
+            let m = <N::PackedLength as Unsigned>::USIZE;
+            let n = m + <PublicKeyCca<N> as Codable>::SIZE;
+            let o = n + 32;
+            SecretKey::decode(buffer[..m].as_ref()).and_then(|sk| {
+                PublicKeyCca::decode(buffer[m..n].as_ref()).map(|pk| {
+                    let mut pk_hash = GenericArray::default();
+                    pk_hash.clone_from_slice(buffer[n..o].as_ref());
+                    let mut reject = GenericArray::default();
+                    reject.clone_from_slice(buffer[o..].as_ref());
+                    SecretKeyCca {
+                        sk: sk,
+                        pk: pk,
+                        pk_hash: pk_hash,
+                        reject: reject,
+                    }
+                })
+            })
         }
     }
 
-    type CipherTextCcaLineValid<N> = Concat<CipherTextCpa<N>, GenericArray<u8, U32>>;
-
-    impl<N> LineValid for CipherTextCca<N>
+    impl<N> Codable for CipherTextCca<N>
     where
-        N: Packable + Unsigned,
-        CipherTextCpa<N>: LineValid,
-        CipherTextCcaLineValid<N>: LineValid,
+        N: Packable,
+        N::PackedLength: Unsigned,
+        N::CompressedLength: Unsigned,
+        PublicKey<N>: Codable,
     {
-        type Length = <CipherTextCcaLineValid<N> as LineValid>::Length;
+        const SIZE: usize = PublicKey::<N>::SIZE + N::CompressedLength::USIZE + 32;
 
-        fn try_clone_array(a: &GenericArray<u8, Self::Length>) -> Result<Self, ()> {
-            CipherTextCcaLineValid::<N>::try_clone_array(a)
-                .map(|Concat(inner, h)| CipherTextCca { inner: inner, h: h })
+        fn encode(&self, buffer: &mut [u8]) {
+            let m = <N::PackedLength as Unsigned>::USIZE;
+            let n = m + <N::CompressedLength as Unsigned>::USIZE;
+            self.pk.encode(buffer[..m].as_mut());
+            buffer[m..n].clone_from_slice(self.ct.as_ref());
+            buffer[n..].clone_from_slice(self.check.as_ref());
         }
 
-        fn clone_line(&self) -> GenericArray<u8, Self::Length> {
-            Concat(self.inner.clone(), self.h.clone()).clone_line()
+        fn decode(buffer: &[u8]) -> Result<Self, ()> {
+            let m = <N::PackedLength as Unsigned>::USIZE;
+            let n = m + <N::CompressedLength as Unsigned>::USIZE;
+            PublicKey::decode(buffer[..m].as_ref()).map(|pk| {
+                let mut inner = GenericArray::default();
+                inner.clone_from_slice(buffer[m..n].as_ref());
+                let mut check = GenericArray::default();
+                check.clone_from_slice(buffer[n..].as_ref());
+                CipherTextCca {
+                    pk: pk,
+                    ct: inner,
+                    check: check,
+                }
+            })
         }
     }
 }
