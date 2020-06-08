@@ -16,6 +16,12 @@ num-traits = { version = "0.2", optional = true }
 [dev-dependencies]
 rand = { version = "0.7", features = ["wasm-bindgen"] }
 wasm-bindgen-test = "0.3"
+criterion = "0.3"
+criterion-cycles-per-byte = "0.1.1"
+
+[[bench]]
+name = "key_agreement"
+harness = false
 
 [features]
 smallest = ["num-bigint", "num-traits"]

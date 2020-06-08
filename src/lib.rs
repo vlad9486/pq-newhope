@@ -13,4 +13,4 @@ pub mod cpa;
 pub mod cca;
 
 #[cfg(test)]
-mod test;
+mod tests;

@@ -9,8 +9,7 @@ impl PartialEq for Coefficient {
     }
 }
 
-impl Eq for Coefficient {
-}
+impl Eq for Coefficient {}
 
 impl Coefficient {
     pub const Q: u16 = 12289;

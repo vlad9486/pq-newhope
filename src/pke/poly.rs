@@ -424,7 +424,7 @@ where
 
 #[cfg(test)]
 #[cfg(feature = "smallest")]
-mod test {
+mod tests {
     use super::{Poly, FromSeed};
     use generic_array::typenum::{U128, B0};
 
