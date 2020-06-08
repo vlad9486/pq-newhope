@@ -4,7 +4,9 @@ use crate::{
     pke::{Pke, Parameter},
 };
 use generic_array::{GenericArray, sequence::GenericSequence, typenum::U128};
+use wasm_bindgen_test::*;
 
+#[wasm_bindgen_test]
 #[test]
 fn pke() {
     let pke = Parameter::<U128>::new(&GenericArray::generate(|_| rand::random()));
@@ -15,6 +17,7 @@ fn pke() {
     assert_eq!(plain_a, plain_b);
 }
 
+#[wasm_bindgen_test]
 #[test]
 fn cpa() {
     let (pk_a, sk_a) = Cpa::<U128>::generate(&GenericArray::generate(|_| rand::random()));
@@ -23,6 +26,7 @@ fn cpa() {
     assert_eq!(key_a, key_b);
 }
 
+#[wasm_bindgen_test]
 #[test]
 fn cca() {
     let (pk_a, sk_a) = Cca::<U128>::generate(&GenericArray::generate(|_| rand::random()));
