@@ -2,7 +2,7 @@ mod coefficient;
 mod tables;
 mod poly;
 
-use self::poly::{Poly, FromSeed, Ntt};
+pub use self::poly::{Poly, FromSeed, Ntt};
 pub use self::poly::Packable;
 
 use generic_array::{

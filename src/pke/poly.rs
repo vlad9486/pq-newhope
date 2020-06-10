@@ -248,22 +248,28 @@ where
     }
 
     fn random(seed: &[u8; 32]) -> Self {
-        use sha3::{
-            Shake128,
-            digest::{Input, ExtendableOutput, XofReader},
-        };
+        use core::slice;
+        use keccak::f1600;
 
         let mut c = GenericArray::default();
 
-        let mut ext_seed = [0; 33];
-        ext_seed[0..32].clone_from_slice(seed.as_ref());
         for i in 0..((N::USIZE * 8) / Self::BLOCK_SIZE) {
-            ext_seed[32] = i as u8;
-            let mut h = Shake128::default().chain(ext_seed.as_ref()).xof_result();
+            let mut state = [0; 0x19];
+            {
+                let buffer = unsafe {
+                    slice::from_raw_parts_mut(state.as_mut_ptr() as *mut u8, 0xa8)
+                };
+                buffer[0x00..0x20].clone_from_slice(seed.as_ref());
+                buffer[0x20] = i as u8;
+                buffer[0x21] = 0x1f;
+                buffer[0xa7] = 0x80;
+                f1600(&mut state);
+            }
             let mut counter = 0;
             'block: loop {
-                let mut buffer = [0; 168];
-                h.read(buffer.as_mut());
+                let buffer = unsafe {
+                    slice::from_raw_parts_mut(state.as_mut_ptr() as *mut u8, 0xa8)
+                };
                 for chunk in buffer.chunks(2) {
                     let r = (chunk[0] as u16) | ((chunk[1] as u16) << 8);
                     match Coefficient::try_new(r) {
@@ -277,6 +283,7 @@ where
                         break 'block;
                     }
                 }
+                f1600(&mut state);
             }
         }
 
@@ -353,8 +360,9 @@ where
         let mut s = self;
 
         for i in 0..1024 {
-            let a = (s.coefficients[i].data() as u32) * (gammas[i] as u32);
-            s.coefficients[i] = Coefficient::montgomery_reduce(a);
+            s.coefficients[i] = Coefficient::montgomery_reduce(
+                (gammas[i] as u32) * (s.coefficients[i].data() as u32),
+            );
         }
 
         s
@@ -423,11 +431,11 @@ where
 }
 
 #[cfg(test)]
-#[cfg(feature = "smallest")]
 mod tests {
-    use super::{Poly, FromSeed};
+    use super::{Poly, FromSeed, Ntt};
     use generic_array::typenum::{U128, B0};
 
+    #[cfg(feature = "smallest")]
     #[test]
     fn smallest() {
         let poly = Poly::<U128, B0>::random(&rand::random());
@@ -435,5 +443,13 @@ mod tests {
         let poly_new = Poly::<U128, B0>::from_smallest(dump.as_ref());
         assert_eq!(poly, poly_new);
         assert!(dump.len() <= 1739);
+    }
+
+    #[test]
+    fn ntt() {
+        let poly = Poly::<U128, B0>::random(&rand::random());
+        let poly_new = poly.clone().ntt().reverse_bits().inv_ntt().reverse_bits();
+
+        assert_eq!(poly.coefficients, poly_new.coefficients);
     }
 }
