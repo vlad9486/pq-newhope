@@ -7,7 +7,7 @@ pub use self::poly::Packable;
 
 use generic_array::{
     GenericArray, ArrayLength,
-    typenum::{Unsigned, U32, B0, B1},
+    typenum::{U32, B0, B1},
 };
 
 #[derive(Clone)]
@@ -64,7 +64,7 @@ pub trait Pke {
 
 impl<N> Pke for Parameter<N>
 where
-    N: Packable + Unsigned,
+    N: Packable,
     Poly<N, B0>: FromSeed + Ntt<Output = Poly<N, B1>>,
     Poly<N, B1>: Ntt<Output = Poly<N, B0>>,
 {
@@ -126,7 +126,7 @@ mod codable {
 
     impl<N> Codable for PublicKey<N>
     where
-        N: Packable + Unsigned,
+        N: Packable,
     {
         const SIZE: usize = N::PackedLength::USIZE;
 
@@ -143,7 +143,7 @@ mod codable {
 
     impl<N> Codable for SecretKey<N>
     where
-        N: Packable + Unsigned,
+        N: Packable,
     {
         const SIZE: usize = N::PackedLength::USIZE;
 

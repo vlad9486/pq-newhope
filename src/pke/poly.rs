@@ -10,7 +10,7 @@ use generic_array::{
 };
 
 pub trait Packable {
-    type PolyLength: ArrayLength<Coefficient> + Unsigned;
+    type PolyLength: ArrayLength<Coefficient>;
     type PackedLength: ArrayLength<u8>;
     type CompressedLength: ArrayLength<u8>;
 
@@ -33,10 +33,10 @@ pub trait Packable {
 
 impl<N> Packable for N
 where
-    N: Div<U8> + ArrayLength<Coefficient> + PowerOfTwo + Unsigned,
+    N: Div<U8> + PowerOfTwo + ArrayLength<Coefficient> + Unsigned,
     <N as Div<U8>>::Output: Mul<U14> + Mul<U3>,
-    <<N as Div<U8>>::Output as Mul<U14>>::Output: ArrayLength<u8>,
-    <<N as Div<U8>>::Output as Mul<U3>>::Output: ArrayLength<u8>,
+    <<N as Div<U8>>::Output as Mul<U14>>::Output: ArrayLength<u8> + Unsigned,
+    <<N as Div<U8>>::Output as Mul<U3>>::Output: ArrayLength<u8> + Unsigned,
 {
     type PolyLength = N;
     type PackedLength = <<N as Div<U8>>::Output as Mul<U14>>::Output;
@@ -175,7 +175,7 @@ where
     {
         let mut r = GenericArray::default();
 
-        for i in 0..<N as Packable>::PolyLength::USIZE {
+        for i in 0..N::PolyLength::USIZE {
             r[i] = f(&a.coefficients[i], &b.coefficients[i]);
         }
 
@@ -187,7 +187,7 @@ where
         F: Fn(&Coefficient, &Coefficient, &Coefficient) -> Coefficient,
     {
         let mut r = GenericArray::default();
-        for i in 0..<N as Packable>::PolyLength::USIZE {
+        for i in 0..N::PolyLength::USIZE {
             r[i] = f(&a.coefficients[i], &b.coefficients[i], &c.coefficients[i]);
         }
         Self::new(r)
@@ -203,13 +203,13 @@ pub trait FromSeed {
 
 impl<N, R> FromSeed for Poly<N, R>
 where
-    N: Packable + Unsigned,
+    N: Packable,
     R: Bit,
 {
     fn from_message(message: &[u8; 32]) -> Self {
         let mut c = GenericArray::default();
 
-        for i in 0..N::USIZE {
+        for i in 0..N::PolyLength::USIZE {
             let l = i % 256;
             if (message[l / 8] & (1 << (l % 8))) != 0 {
                 c[i] = Coefficient::MIDDLE;
@@ -224,12 +224,13 @@ where
         let mut t = [0; BITS];
         let mut message = [0; 32];
 
-        for i in 0..N::USIZE {
+        for i in 0..N::PolyLength::USIZE {
             t[i % BITS] += self.coefficients[i].flip_abs() as u32;
         }
 
         for l in 0..BITS {
-            if t[l] < (Coefficient::QUARTER.data() * (N::USIZE as u32) / (BITS as u32)) {
+            let quarter = Coefficient::QUARTER.data();
+            if t[l] < (quarter * (N::PolyLength::USIZE as u32) / (BITS as u32)) {
                 message[l / 8] |= 1 << (l % 8);
             }
         }
@@ -243,7 +244,7 @@ where
 
         let mut c = GenericArray::default();
 
-        for i in 0..(N::USIZE / Self::BLOCK_SIZE) {
+        for i in 0..(N::PolyLength::USIZE / Self::BLOCK_SIZE) {
             let mut state = [0; 0x19];
             {
                 let buffer =
@@ -285,7 +286,7 @@ where
         ext_seed[0..32].clone_from_slice(seed.as_ref());
         ext_seed[32] = nonce;
 
-        for i in 0..(N::USIZE / Self::BLOCK_SIZE) {
+        for i in 0..(N::PolyLength::USIZE / Self::BLOCK_SIZE) {
             ext_seed[33] = i as u8;
 
             // Compute the Hamming weight of a byte
@@ -386,7 +387,6 @@ where
 
 impl<R> Ntt for Poly<U1024, R>
 where
-    Coefficient: Default + Clone,
     R: Bit + BitXor<B1>,
     <R as BitXor<B1>>::Output: Bit + BitXor<B1, Output = R>,
 {

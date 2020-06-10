@@ -5,7 +5,7 @@ use super::{
 use core::{marker::PhantomData, ops::Add};
 use generic_array::{
     GenericArray, ArrayLength,
-    typenum::{Unsigned, U32, U64},
+    typenum::{U32, U64},
 };
 
 pub struct Cca<N>(PhantomData<N>)
@@ -48,8 +48,9 @@ type CtLength<N> = <PkLength<N> as Add<<N as Packable>::CompressedLength>>::Outp
 
 impl<N> Cca<N>
 where
-    N: Packable + Unsigned,
-    N::PackedLength: Add<U32> + Unsigned,
+    N: Packable,
+    N::PackedLength: Add<U32>,
+    PublicKeyCca<N>: Clone,
     PkLength<N>: ArrayLength<u8> + Add<N::CompressedLength>,
     CtLength<N>: ArrayLength<u8>,
     Parameter<N>: Pke<
@@ -220,20 +221,19 @@ mod codable {
     impl<N> Codable for PublicKeyCca<N>
     where
         N: Packable,
-        N::PackedLength: Unsigned,
         Parameter<N>: Pke<Seed = U32>,
         PublicKey<N>: Codable,
     {
         const SIZE: usize = PublicKey::<N>::SIZE + 32;
 
         fn encode(&self, buffer: &mut [u8]) {
-            let m = <N::PackedLength as Unsigned>::USIZE;
+            let m = N::PackedLength::USIZE;
             self.pk.encode(buffer[..m].as_mut());
             buffer[m..].clone_from_slice(self.seed.as_ref());
         }
 
         fn decode(buffer: &[u8]) -> Result<Self, ()> {
-            let m = <N::PackedLength as Unsigned>::USIZE;
+            let m = N::PackedLength::USIZE;
             PublicKey::decode(buffer[..m].as_ref()).map(|inner| {
                 let mut seed = GenericArray::default();
                 seed.clone_from_slice(buffer[m..].as_ref());
@@ -249,14 +249,13 @@ mod codable {
     impl<N> Codable for SecretKeyCca<N>
     where
         N: Packable,
-        N::PackedLength: Unsigned,
         SecretKey<N>: Codable,
         PublicKeyCca<N>: Codable,
     {
         const SIZE: usize = SecretKey::<N>::SIZE;
 
         fn encode(&self, buffer: &mut [u8]) {
-            let m = <N::PackedLength as Unsigned>::USIZE;
+            let m = N::PackedLength::USIZE;
             let n = m + <PublicKeyCca<N> as Codable>::SIZE;
             let o = n + 32;
             self.sk.encode(buffer[..m].as_mut());
@@ -266,7 +265,7 @@ mod codable {
         }
 
         fn decode(buffer: &[u8]) -> Result<Self, ()> {
-            let m = <N::PackedLength as Unsigned>::USIZE;
+            let m = N::PackedLength::USIZE;
             let n = m + <PublicKeyCca<N> as Codable>::SIZE;
             let o = n + 32;
             SecretKey::decode(buffer[..m].as_ref()).and_then(|sk| {
@@ -289,23 +288,21 @@ mod codable {
     impl<N> Codable for CipherTextCca<N>
     where
         N: Packable,
-        N::PackedLength: Unsigned,
-        N::CompressedLength: Unsigned,
         PublicKey<N>: Codable,
     {
         const SIZE: usize = PublicKey::<N>::SIZE + N::CompressedLength::USIZE + 32;
 
         fn encode(&self, buffer: &mut [u8]) {
-            let m = <N::PackedLength as Unsigned>::USIZE;
-            let n = m + <N::CompressedLength as Unsigned>::USIZE;
+            let m = N::PackedLength::USIZE;
+            let n = m + N::CompressedLength::USIZE;
             self.pk.encode(buffer[..m].as_mut());
             buffer[m..n].clone_from_slice(self.ct.as_ref());
             buffer[n..].clone_from_slice(self.check.as_ref());
         }
 
         fn decode(buffer: &[u8]) -> Result<Self, ()> {
-            let m = <N::PackedLength as Unsigned>::USIZE;
-            let n = m + <N::CompressedLength as Unsigned>::USIZE;
+            let m = N::PackedLength::USIZE;
+            let n = m + N::CompressedLength::USIZE;
             PublicKey::decode(buffer[..m].as_ref()).map(|pk| {
                 let mut inner = GenericArray::default();
                 inner.clone_from_slice(buffer[m..n].as_ref());
