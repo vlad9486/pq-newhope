@@ -4,10 +4,7 @@ use super::{
     pke::{Codable, Pke, PublicKey, SecretKey, Parameter},
 };
 use core::marker::PhantomData;
-use generic_array::{
-    GenericArray,
-    typenum::U32,
-};
+use generic_array::{GenericArray, typenum::U32};
 
 pub struct Cpa<N>(PhantomData<N>)
 where
