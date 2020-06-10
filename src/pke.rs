@@ -1,9 +1,4 @@
-mod coefficient;
-mod tables;
-mod poly;
-
-pub use self::poly::{Poly, FromSeed, Ntt};
-pub use self::poly::Packable;
+use super::poly::{Poly, FromSeed, Ntt, Packable};
 
 use generic_array::{
     GenericArray, ArrayLength,

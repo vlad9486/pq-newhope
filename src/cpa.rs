@@ -1,6 +1,7 @@
 use super::{
     hash,
-    pke::{Packable, Codable, Pke, PublicKey, SecretKey, Parameter},
+    poly::Packable,
+    pke::{Codable, Pke, PublicKey, SecretKey, Parameter},
 };
 use core::marker::PhantomData;
 use generic_array::{

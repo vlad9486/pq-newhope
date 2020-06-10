@@ -2,7 +2,8 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion, Benchmark
 use criterion_cycles_per_byte::CyclesPerByte;
 
 use pq_newhope::{
-    pke::{Pke, Parameter, Poly, Ntt, FromSeed},
+    poly::{Poly, Ntt, FromSeed},
+    pke::{Pke, Parameter},
     cpa::Cpa,
     cca::Cca,
 };
