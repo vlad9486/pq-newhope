@@ -1,8 +1,16 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
 use criterion_cycles_per_byte::CyclesPerByte;
 
-use pq_newhope::{pke::{Pke, Parameter, Poly, Ntt, FromSeed}, cpa::Cpa, cca::Cca};
-use generic_array::{GenericArray, sequence::GenericSequence, typenum::{U32, U64, U128, B0}};
+use pq_newhope::{
+    pke::{Pke, Parameter, Poly, Ntt, FromSeed},
+    cpa::Cpa,
+    cca::Cca,
+};
+use generic_array::{
+    GenericArray,
+    sequence::GenericSequence,
+    typenum::{U32, U64, U128, B0},
+};
 
 fn gen_poly(a: &GenericArray<u8, U32>) {
     let pke = Parameter::<U128>::new(a);
@@ -61,9 +69,15 @@ fn bench(c: &mut Criterion<CyclesPerByte>) {
 
     group.bench_function(BenchmarkId::new("gen", 0), |b| b.iter(|| gen_poly(&a)));
     group.bench_function(BenchmarkId::new("ntt", 0), |b| b.iter(|| ntt(p.clone())));
-    group.bench_function(BenchmarkId::new("pke", 0), |b| b.iter(|| pke(&a, &gen, &enc, &plain)));
-    group.bench_function(BenchmarkId::new("cpa", 0), |b| b.iter(|| cpa(&g_cpa, &e_cpa)));
-    group.bench_function(BenchmarkId::new("cca", 0), |b| b.iter(|| cca(&g_cca, &e_cca)));
+    group.bench_function(BenchmarkId::new("pke", 0), |b| {
+        b.iter(|| pke(&a, &gen, &enc, &plain))
+    });
+    group.bench_function(BenchmarkId::new("cpa", 0), |b| {
+        b.iter(|| cpa(&g_cpa, &e_cpa))
+    });
+    group.bench_function(BenchmarkId::new("cca", 0), |b| {
+        b.iter(|| cca(&g_cca, &e_cca))
+    });
 
     group.finish()
 }

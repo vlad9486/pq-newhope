@@ -256,9 +256,8 @@ where
         for i in 0..((N::USIZE * 8) / Self::BLOCK_SIZE) {
             let mut state = [0; 0x19];
             {
-                let buffer = unsafe {
-                    slice::from_raw_parts_mut(state.as_mut_ptr() as *mut u8, 0xa8)
-                };
+                let buffer =
+                    unsafe { slice::from_raw_parts_mut(state.as_mut_ptr() as *mut u8, 0xa8) };
                 buffer[0x00..0x20].clone_from_slice(seed.as_ref());
                 buffer[0x20] = i as u8;
                 buffer[0x21] = 0x1f;
@@ -267,9 +266,8 @@ where
             }
             let mut counter = 0;
             'block: loop {
-                let buffer = unsafe {
-                    slice::from_raw_parts_mut(state.as_mut_ptr() as *mut u8, 0xa8)
-                };
+                let buffer =
+                    unsafe { slice::from_raw_parts_mut(state.as_mut_ptr() as *mut u8, 0xa8) };
                 for chunk in buffer.chunks(2) {
                     let r = (chunk[0] as u16) | ((chunk[1] as u16) << 8);
                     match Coefficient::try_new(r) {
