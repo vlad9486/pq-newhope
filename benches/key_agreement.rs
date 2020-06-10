@@ -9,15 +9,15 @@ use pq_newhope::{
 use generic_array::{
     GenericArray,
     sequence::GenericSequence,
-    typenum::{U32, U64, U128, B0},
+    typenum::{U32, U64, U1024, B0},
 };
 
 fn gen_poly(a: &GenericArray<u8, U32>) {
-    let pke = Parameter::<U128>::new(a);
+    let pke = Parameter::<U1024>::new(a);
     black_box(pke);
 }
 
-fn ntt(poly: Poly<U128, B0>) {
+fn ntt(poly: Poly<U1024, B0>) {
     black_box(poly.ntt());
 }
 
@@ -27,24 +27,24 @@ fn pke(
     enc: &GenericArray<u8, U32>,
     plain: &GenericArray<u8, U32>,
 ) {
-    let pke = Parameter::<U128>::new(a);
+    let pke = Parameter::<U1024>::new(a);
     let (pk_a, sk_a) = pke.generate(gen);
     let (pk_b, ct) = pke.encrypt(enc, &pk_a, plain);
-    let plain_b = Parameter::<U128>::decrypt(&pk_b, &sk_a, &ct);
+    let plain_b = Parameter::<U1024>::decrypt(&pk_b, &sk_a, &ct);
     black_box(plain_b);
 }
 
 fn cpa(g: &GenericArray<u8, U32>, e: &GenericArray<u8, U32>) {
-    let (pk_a, sk_a) = Cpa::<U128>::generate(g);
-    let (ct, key_b) = Cpa::<U128>::encapsulate(&pk_a, e);
-    let key_a = Cpa::<U128>::decapsulate(&sk_a, &ct);
+    let (pk_a, sk_a) = Cpa::<U1024>::generate(g);
+    let (ct, key_b) = Cpa::<U1024>::encapsulate(&pk_a, e);
+    let key_a = Cpa::<U1024>::decapsulate(&sk_a, &ct);
     black_box((key_a, key_b));
 }
 
 fn cca(g: &GenericArray<u8, U64>, e: &GenericArray<u8, U32>) {
-    let (pk_a, sk_a) = Cca::<U128>::generate(g);
-    let (ct, key_b) = Cca::<U128>::encapsulate(&pk_a, e);
-    let key_a = Cca::<U128>::decapsulate(&sk_a, &ct);
+    let (pk_a, sk_a) = Cca::<U1024>::generate(g);
+    let (ct, key_b) = Cca::<U1024>::encapsulate(&pk_a, e);
+    let key_a = Cca::<U1024>::decapsulate(&sk_a, &ct);
     black_box((key_a, key_b));
 }
 
@@ -65,7 +65,7 @@ fn bench(c: &mut Criterion<CyclesPerByte>) {
         GenericArray::generate(|_| rand::random()),
     );
 
-    let p = Poly::<U128, B0>::random(&a.into());
+    let p = Poly::<U1024, B0>::random(&a.into());
 
     group.bench_function(BenchmarkId::new("gen", 0), |b| b.iter(|| gen_poly(&a)));
     group.bench_function(BenchmarkId::new("ntt", 0), |b| b.iter(|| ntt(p.clone())));

@@ -2,15 +2,15 @@ use super::coefficient::Coefficient;
 use crate::hash;
 use core::{
     marker::PhantomData,
-    ops::{Mul, BitXor},
+    ops::{Mul, Div, BitXor},
 };
 use generic_array::{
     GenericArray, ArrayLength,
-    typenum::{Unsigned, U8, U14, U3, Bit, B1, U128},
+    typenum::{Unsigned, U8, U14, U3, U1024, Bit, B1, PowerOfTwo},
 };
 
 pub trait Packable {
-    type PolyLength: ArrayLength<Coefficient>;
+    type PolyLength: ArrayLength<Coefficient> + Unsigned;
     type PackedLength: ArrayLength<u8>;
     type CompressedLength: ArrayLength<u8>;
 
@@ -33,21 +33,21 @@ pub trait Packable {
 
 impl<N> Packable for N
 where
-    N: Mul<U8> + Mul<U14> + Mul<U3> + Unsigned,
-    <N as Mul<U8>>::Output: ArrayLength<Coefficient>,
-    <N as Mul<U14>>::Output: ArrayLength<u8>,
-    <N as Mul<U3>>::Output: ArrayLength<u8>,
+    N: Div<U8> + ArrayLength<Coefficient> + PowerOfTwo + Unsigned,
+    <N as Div<U8>>::Output: Mul<U14> + Mul<U3>,
+    <<N as Div<U8>>::Output as Mul<U14>>::Output: ArrayLength<u8>,
+    <<N as Div<U8>>::Output as Mul<U3>>::Output: ArrayLength<u8>,
 {
-    type PolyLength = <N as Mul<U8>>::Output;
-    type PackedLength = <N as Mul<U14>>::Output;
-    type CompressedLength = <N as Mul<U3>>::Output;
+    type PolyLength = N;
+    type PackedLength = <<N as Div<U8>>::Output as Mul<U14>>::Output;
+    type CompressedLength = <<N as Div<U8>>::Output as Mul<U3>>::Output;
 
     fn pack(
         v: &GenericArray<Coefficient, Self::PolyLength>,
     ) -> GenericArray<u8, Self::PackedLength> {
         let mut r = GenericArray::default();
 
-        for i in 0..(N::USIZE * 2) {
+        for i in 0..(N::USIZE / 4) {
             let mut t = [0; 4];
             for j in 0..4 {
                 t[j] = v[4 * i + j].freeze() as u16;
@@ -71,7 +71,7 @@ where
     ) -> Result<GenericArray<Coefficient, Self::PolyLength>, ()> {
         let mut c = GenericArray::default();
 
-        for i in 0..(N::USIZE * 2) {
+        for i in 0..(N::USIZE / 4) {
             let a = |j| v[7 * i + j] as u16;
             let c = &mut c[(4 * i)..(4 * (i + 1))];
 
@@ -89,7 +89,7 @@ where
     ) -> GenericArray<u8, Self::CompressedLength> {
         let mut a = GenericArray::default();
 
-        for i in 0..N::USIZE {
+        for i in 0..(N::USIZE / 8) {
             let mut t = [0; 8];
             for j in 0..8 {
                 t[j] = v[8 * i + j].compress()
@@ -108,7 +108,7 @@ where
     ) -> GenericArray<Coefficient, Self::PolyLength> {
         let mut c = GenericArray::default();
 
-        for i in 0..N::USIZE {
+        for i in 0..(N::USIZE / 8) {
             let a = &v[(3 * i)..(3 * (i + 1))];
             let t = [
                 a[0] & 0x07,
@@ -141,7 +141,7 @@ where
 
 impl<N, R> Poly<N, R>
 where
-    N: Packable + Unsigned,
+    N: Packable,
     R: Bit,
 {
     const BLOCK_SIZE: usize = 1 << 6;
@@ -151,15 +151,6 @@ where
             coefficients: coefficients,
             phantom_data: PhantomData,
         }
-    }
-
-    pub fn rt_check() {
-        assert!((N::USIZE & (N::USIZE - 1)) == 0, "should be power of two");
-        assert!(
-            N::USIZE * 8 < Self::BLOCK_SIZE * 256,
-            "block has {} coefficients, index of the block should fit in byte",
-            Self::BLOCK_SIZE,
-        );
     }
 
     pub fn pack(&self) -> GenericArray<u8, N::PackedLength> {
@@ -184,7 +175,7 @@ where
     {
         let mut r = GenericArray::default();
 
-        for i in 0..(N::USIZE * 8) {
+        for i in 0..<N as Packable>::PolyLength::USIZE {
             r[i] = f(&a.coefficients[i], &b.coefficients[i]);
         }
 
@@ -196,7 +187,7 @@ where
         F: Fn(&Coefficient, &Coefficient, &Coefficient) -> Coefficient,
     {
         let mut r = GenericArray::default();
-        for i in 0..(N::USIZE * 8) {
+        for i in 0..<N as Packable>::PolyLength::USIZE {
             r[i] = f(&a.coefficients[i], &b.coefficients[i], &c.coefficients[i]);
         }
         Self::new(r)
@@ -218,7 +209,7 @@ where
     fn from_message(message: &[u8; 32]) -> Self {
         let mut c = GenericArray::default();
 
-        for i in 0..(N::USIZE * 8) {
+        for i in 0..N::USIZE {
             let l = i % 256;
             if (message[l / 8] & (1 << (l % 8))) != 0 {
                 c[i] = Coefficient::MIDDLE;
@@ -230,16 +221,15 @@ where
 
     fn to_message_negate(&self) -> [u8; 32] {
         const BITS: usize = 256;
-        let coefficients = N::USIZE * 8;
         let mut t = [0; BITS];
         let mut message = [0; 32];
 
-        for i in 0..coefficients {
+        for i in 0..N::USIZE {
             t[i % BITS] += self.coefficients[i].flip_abs() as u32;
         }
 
         for l in 0..BITS {
-            if t[l] < (Coefficient::QUARTER.data() * (coefficients as u32) / (BITS as u32)) {
+            if t[l] < (Coefficient::QUARTER.data() * (N::USIZE as u32) / (BITS as u32)) {
                 message[l / 8] |= 1 << (l % 8);
             }
         }
@@ -253,7 +243,7 @@ where
 
         let mut c = GenericArray::default();
 
-        for i in 0..((N::USIZE * 8) / Self::BLOCK_SIZE) {
+        for i in 0..(N::USIZE / Self::BLOCK_SIZE) {
             let mut state = [0; 0x19];
             {
                 let buffer =
@@ -295,7 +285,7 @@ where
         ext_seed[0..32].clone_from_slice(seed.as_ref());
         ext_seed[32] = nonce;
 
-        for i in 0..((N::USIZE * 8) / Self::BLOCK_SIZE) {
+        for i in 0..(N::USIZE / Self::BLOCK_SIZE) {
             ext_seed[33] = i as u8;
 
             // Compute the Hamming weight of a byte
@@ -321,7 +311,7 @@ pub trait Ntt {
     fn inv_ntt(self) -> Self::Output;
 }
 
-impl<R> Poly<U128, R>
+impl<R> Poly<U1024, R>
 where
     R: Bit + BitXor<B1>,
     <R as BitXor<B1>>::Output: Bit + BitXor<B1, Output = R>,
@@ -366,7 +356,7 @@ where
         s
     }
 
-    fn transform(self, omegas: &[u16]) -> Poly<U128, <R as BitXor<B1>>::Output> {
+    fn transform(self, omegas: &[u16]) -> Poly<U1024, <R as BitXor<B1>>::Output> {
         let mut s = Poly::new(self.coefficients);
 
         for i in 0..10 {
@@ -394,13 +384,13 @@ where
     }
 }
 
-impl<R> Ntt for Poly<U128, R>
+impl<R> Ntt for Poly<U1024, R>
 where
     Coefficient: Default + Clone,
     R: Bit + BitXor<B1>,
     <R as BitXor<B1>>::Output: Bit + BitXor<B1, Output = R>,
 {
-    type Output = Poly<U128, <R as BitXor<B1>>::Output>;
+    type Output = Poly<U1024, <R as BitXor<B1>>::Output>;
 
     fn reverse_bits(self) -> Self::Output {
         let mut s = Poly::new(self.coefficients);
@@ -431,21 +421,21 @@ where
 #[cfg(test)]
 mod tests {
     use super::{Poly, FromSeed, Ntt};
-    use generic_array::typenum::{U128, B0};
+    use generic_array::typenum::{U1024, B0};
 
     #[cfg(feature = "smallest")]
     #[test]
     fn smallest() {
-        let poly = Poly::<U128, B0>::random(&rand::random());
+        let poly = Poly::<U1024, B0>::random(&rand::random());
         let dump = poly.smallest();
-        let poly_new = Poly::<U128, B0>::from_smallest(dump.as_ref());
+        let poly_new = Poly::<U1024, B0>::from_smallest(dump.as_ref());
         assert_eq!(poly, poly_new);
         assert!(dump.len() <= 1739);
     }
 
     #[test]
     fn ntt() {
-        let poly = Poly::<U128, B0>::random(&rand::random());
+        let poly = Poly::<U1024, B0>::random(&rand::random());
         let poly_new = poly.clone().ntt().reverse_bits().inv_ntt().reverse_bits();
 
         assert_eq!(poly.coefficients, poly_new.coefficients);
