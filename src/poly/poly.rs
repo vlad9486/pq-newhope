@@ -1,12 +1,12 @@
-use super::coefficient::Coefficient;
+use super::coefficient::{Coefficient, CoefficientRich};
 use crate::hash;
 use core::{
     marker::PhantomData,
-    ops::{Mul, Div, BitXor},
+    ops::{Mul, Div, Not},
 };
 use generic_array::{
     GenericArray, ArrayLength,
-    typenum::{Unsigned, U8, U14, U3, U1024, Bit, B1, PowerOfTwo},
+    typenum::{Unsigned, U8, U14, U3, U1024, Bit, B0, PowerOfTwo, Logarithm2},
 };
 
 pub trait Packable {
@@ -129,20 +129,52 @@ where
     }
 }
 
-#[derive(Clone, Eq, PartialEq, Debug)]
-pub struct Poly<N, R>
+pub trait Involution
 where
-    N: Packable,
-    R: Bit,
+    Self: Sized,
 {
-    coefficients: GenericArray<Coefficient, N::PolyLength>,
-    phantom_data: PhantomData<R>,
+    type Op: Involution<Op = Self>;
 }
 
-impl<N, R> Poly<N, R>
+impl<T> Involution for T
+where
+    T: Bit + Not,
+    <T as Not>::Output: Bit + Not<Output = T>,
+{
+    type Op = <T as Not>::Output;
+}
+
+pub trait PolyState {
+    type BitOrder: Involution;
+    type Size: Involution;
+    type Domain: Involution;
+}
+
+impl<BitOrder, Size, Domain> PolyState for (BitOrder, Size, Domain)
+where
+    BitOrder: Involution,
+    Size: Involution,
+    Domain: Involution,
+{
+    type BitOrder = BitOrder;
+    type Size = Size;
+    type Domain = Domain;
+}
+
+#[derive(Clone, Eq, PartialEq, Debug)]
+pub struct Poly<N, S>
 where
     N: Packable,
-    R: Bit,
+    S: PolyState,
+{
+    coefficients: GenericArray<Coefficient, N::PolyLength>,
+    phantom_data: PhantomData<S>,
+}
+
+impl<N, S> Poly<N, S>
+where
+    N: Packable,
+    S: PolyState,
 {
     const BLOCK_SIZE: usize = 1 << 6;
 
@@ -169,26 +201,40 @@ where
         Self::new(N::decompress(v))
     }
 
-    pub fn functor_2<F>(a: &Self, b: &Self, f: F) -> Self
+    pub fn functor_2<F, S0, S1>(a: &Poly<N, S0>, b: &Poly<N, S1>, f: F) -> Self
     where
-        F: Fn(&Coefficient, &Coefficient) -> Coefficient,
+        F: Fn(CoefficientRich<S0>, CoefficientRich<S1>) -> CoefficientRich<S>,
+        S0: PolyState,
+        S1: PolyState,
     {
         let mut r = GenericArray::default();
 
         for i in 0..N::PolyLength::USIZE {
-            r[i] = f(&a.coefficients[i], &b.coefficients[i]);
+            r[i] = f(
+                CoefficientRich::new(a.coefficients[i].data()),
+                CoefficientRich::new(b.coefficients[i].data()),
+            )
+            .0;
         }
 
         Self::new(r)
     }
 
-    pub fn functor_3<F>(a: &Self, b: &Self, c: &Self, f: F) -> Self
+    pub fn functor_3<F, S0, S1, S2>(a: &Poly<N, S0>, b: &Poly<N, S1>, c: &Poly<N, S2>, f: F) -> Self
     where
-        F: Fn(&Coefficient, &Coefficient, &Coefficient) -> Coefficient,
+        F: Fn(CoefficientRich<S0>, CoefficientRich<S1>, CoefficientRich<S2>) -> CoefficientRich<S>,
+        S0: PolyState,
+        S1: PolyState,
+        S2: PolyState,
     {
         let mut r = GenericArray::default();
         for i in 0..N::PolyLength::USIZE {
-            r[i] = f(&a.coefficients[i], &b.coefficients[i], &c.coefficients[i]);
+            r[i] = f(
+                CoefficientRich::new(a.coefficients[i].data()),
+                CoefficientRich::new(b.coefficients[i].data()),
+                CoefficientRich::new(c.coefficients[i].data()),
+            )
+            .0;
         }
         Self::new(r)
     }
@@ -198,13 +244,16 @@ pub trait FromSeed {
     fn from_message(message: &[u8; 32]) -> Self;
     fn to_message_negate(&self) -> [u8; 32];
     fn random(seed: &[u8; 32]) -> Self;
+}
+
+pub trait FromSeedSmall {
     fn random_small(seed: &[u8; 32], nonce: u8) -> Self;
 }
 
-impl<N, R> FromSeed for Poly<N, R>
+impl<N, S> FromSeed for Poly<N, S>
 where
     N: Packable,
-    R: Bit,
+    S: PolyState,
 {
     fn from_message(message: &[u8; 32]) -> Self {
         let mut c = GenericArray::default();
@@ -278,7 +327,14 @@ where
 
         Self::new(c)
     }
+}
 
+impl<N, BitOrder, Domain> FromSeedSmall for Poly<N, (BitOrder, B0, Domain)>
+where
+    N: Packable,
+    BitOrder: Involution,
+    Domain: Involution,
+{
     fn random_small(seed: &[u8; 32], nonce: u8) -> Self {
         let mut c = GenericArray::default();
 
@@ -304,18 +360,117 @@ where
     }
 }
 
+pub trait ReverseBits {
+    type Output: ReverseBits;
+
+    fn reverse_bits(self) -> Self::Output;
+}
+
+impl<N, S> ReverseBits for Poly<N, S>
+where
+    N: Packable,
+    N::PolyLength: Unsigned + Logarithm2,
+    <N::PolyLength as Logarithm2>::Output: Unsigned,
+    S: PolyState,
+{
+    type Output = Poly<N, (<S::BitOrder as Involution>::Op, S::Size, S::Domain)>;
+
+    fn reverse_bits(self) -> Self::Output {
+        let mut s = Poly::new(self.coefficients);
+
+        for i in 0..1024 {
+            let (j, _) = (0..<N::PolyLength as Logarithm2>::Output::USIZE)
+                .fold((0, i), |(y, x), _| (y * 2 + x % 2, x / 2));
+            if i < j {
+                let temp = s.coefficients[i].clone();
+                s.coefficients[i] = s.coefficients[j].clone();
+                s.coefficients[j] = temp;
+            }
+        }
+
+        s
+    }
+}
+
 pub trait Ntt {
     type Output: Ntt;
 
-    fn reverse_bits(self) -> Self::Output;
     fn ntt(self) -> Self::Output;
     fn inv_ntt(self) -> Self::Output;
 }
 
-impl<R> Poly<U1024, R>
+fn multiply<N, S>(s: Poly<N, S>, gammas: &[u16]) -> Poly<N, S>
 where
-    R: Bit + BitXor<B1>,
-    <R as BitXor<B1>>::Output: Bit + BitXor<B1, Output = R>,
+    N: Packable,
+    S: PolyState,
+{
+    let mut s = s;
+
+    for i in 0..N::PolyLength::USIZE {
+        s.coefficients[i] =
+            Coefficient::montgomery_reduce((gammas[i] as u32) * s.coefficients[i].data());
+    }
+
+    s
+}
+
+fn transform<BitOrder, Size, Domain>(
+    s: Poly<U1024, (BitOrder, Size, Domain)>,
+    omegas: &[u16],
+) -> Poly<U1024, (BitOrder::Op, Size, Domain::Op)>
+where
+    BitOrder: Involution,
+    Size: Involution,
+    Domain: Involution,
+{
+    let mut s = Poly::new(s.coefficients);
+
+    for i in 0..10 {
+        let distance = 1 << i;
+        for start in 0..distance {
+            let mut jt_widdle = 0;
+            let mut j = start;
+            loop {
+                let w = omegas[jt_widdle] as u32;
+                jt_widdle += 1;
+                let temp = s.coefficients[j].clone();
+                s.coefficients[j] = &temp + &s.coefficients[j + distance];
+                s.coefficients[j + distance] = Coefficient::montgomery_reduce(
+                    w * (&temp - &s.coefficients[j + distance]).data(),
+                );
+                j += 2 * distance;
+                if j >= 1023 {
+                    break;
+                }
+            }
+        }
+    }
+
+    s
+}
+
+impl<BitOrder, Size, Domain> Ntt for Poly<U1024, (BitOrder, Size, Domain)>
+where
+    BitOrder: Involution,
+    Size: Involution,
+    Domain: Involution,
+{
+    type Output = Poly<U1024, (BitOrder::Op, Size, Domain::Op)>;
+
+    fn ntt(self) -> Self::Output {
+        let s = multiply(self, super::tables::GAMMAS_BITREV_MONTGOMERY.as_ref());
+        transform(s, super::tables::GAMMAS_BITREV_MONTGOMERY.as_ref())
+    }
+
+    fn inv_ntt(self) -> Self::Output {
+        let s = transform(self, super::tables::OMEGAS_INV_BITREV_MONTGOMERY.as_ref());
+        multiply(s, super::tables::GAMMAS_INV_MONTGOMERY.as_ref())
+    }
+}
+
+impl<S> Poly<U1024, S>
+where
+    S: PolyState,
 {
     #[cfg(feature = "smallest")]
     pub fn smallest(&self) -> std::vec::Vec<u8> {
@@ -344,98 +499,26 @@ where
 
         Self::new(c)
     }
-
-    fn multiply(self, gammas: &[u16]) -> Self {
-        let mut s = self;
-
-        for i in 0..1024 {
-            s.coefficients[i] = Coefficient::montgomery_reduce(
-                (gammas[i] as u32) * (s.coefficients[i].data() as u32),
-            );
-        }
-
-        s
-    }
-
-    fn transform(self, omegas: &[u16]) -> Poly<U1024, <R as BitXor<B1>>::Output> {
-        let mut s = Poly::new(self.coefficients);
-
-        for i in 0..10 {
-            let distance = 1 << i;
-            for start in 0..distance {
-                let mut jt_widdle = 0;
-                let mut j = start;
-                loop {
-                    let w = omegas[jt_widdle] as u32;
-                    jt_widdle += 1;
-                    let temp = s.coefficients[j].clone();
-                    s.coefficients[j] = &temp + &s.coefficients[j + distance];
-                    s.coefficients[j + distance] = Coefficient::montgomery_reduce(
-                        w * (&temp - &s.coefficients[j + distance]).data(),
-                    );
-                    j += 2 * distance;
-                    if j >= 1023 {
-                        break;
-                    }
-                }
-            }
-        }
-
-        s
-    }
-}
-
-impl<R> Ntt for Poly<U1024, R>
-where
-    R: Bit + BitXor<B1>,
-    <R as BitXor<B1>>::Output: Bit + BitXor<B1, Output = R>,
-{
-    type Output = Poly<U1024, <R as BitXor<B1>>::Output>;
-
-    fn reverse_bits(self) -> Self::Output {
-        let mut s = Poly::new(self.coefficients);
-
-        for i in 0..1024 {
-            let j = super::tables::BITREV[i] as usize;
-            if i < j {
-                let temp = s.coefficients[i].clone();
-                s.coefficients[i] = s.coefficients[j].clone();
-                s.coefficients[j] = temp;
-            }
-        }
-
-        s
-    }
-
-    fn ntt(self) -> Self::Output {
-        self.multiply(super::tables::GAMMAS_BITREV_MONTGOMERY.as_ref())
-            .transform(super::tables::GAMMAS_BITREV_MONTGOMERY.as_ref())
-    }
-
-    fn inv_ntt(self) -> Self::Output {
-        self.transform(super::tables::OMEGAS_INV_BITREV_MONTGOMERY.as_ref())
-            .multiply(super::tables::GAMMAS_INV_MONTGOMERY.as_ref())
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Poly, FromSeed, Ntt};
-    use generic_array::typenum::{U1024, B0};
+    use super::{Poly, FromSeed, ReverseBits, Ntt};
+    use generic_array::typenum::{U1024, B0, B1};
 
     #[cfg(feature = "smallest")]
     #[test]
     fn smallest() {
-        let poly = Poly::<U1024, B0>::random(&rand::random());
+        let poly = Poly::<U1024, (B0, B1, B0)>::random(&rand::random());
         let dump = poly.smallest();
-        let poly_new = Poly::<U1024, B0>::from_smallest(dump.as_ref());
+        let poly_new = Poly::<U1024, (B0, B1, B0)>::from_smallest(dump.as_ref());
         assert_eq!(poly, poly_new);
         assert!(dump.len() <= 1739);
     }
 
     #[test]
     fn ntt() {
-        let poly = Poly::<U1024, B0>::random(&rand::random());
+        let poly = Poly::<U1024, (B0, B1, B0)>::random(&rand::random());
         let poly_new = poly.clone().ntt().reverse_bits().inv_ntt().reverse_bits();
 
         assert_eq!(poly.coefficients, poly_new.coefficients);

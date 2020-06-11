@@ -18,7 +18,7 @@ fn gen_poly(a: &GenericArray<u8, U32>) {
     black_box(pke);
 }
 
-fn ntt(poly: Poly<U1024, B0>) {
+fn ntt(poly: Poly<U1024, (B0, B0, B0)>) {
     black_box(poly.ntt());
 }
 
@@ -66,7 +66,7 @@ fn bench(c: &mut Criterion<CyclesPerByte>) {
         GenericArray::generate(|_| rand::random()),
     );
 
-    let p = Poly::<U1024, B0>::random(&a.into());
+    let p = Poly::<U1024, (B0, B0, B0)>::random(&a.into());
 
     group.bench_function(BenchmarkId::new("gen", 0), |b| b.iter(|| gen_poly(&a)));
     group.bench_function(BenchmarkId::new("ntt", 0), |b| b.iter(|| ntt(p.clone())));

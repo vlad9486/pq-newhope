@@ -1,22 +1,21 @@
-use super::poly::{Poly, FromSeed, Ntt, Packable};
-
+use super::poly::{Poly, Packable, FromSeed, FromSeedSmall, ReverseBits, Ntt};
 use generic_array::{
     GenericArray, ArrayLength,
     typenum::{U32, B0, B1},
 };
 
 #[derive(Clone)]
-pub struct PublicKey<N>(Poly<N, B0>)
+pub struct PublicKey<N>(Poly<N, (B0, B0, B1)>)
 where
     N: Packable;
 
 #[derive(Clone)]
-pub struct SecretKey<N>(Poly<N, B0>)
+pub struct SecretKey<N>(Poly<N, (B0, B0, B1)>)
 where
     N: Packable;
 
 #[derive(Clone)]
-pub struct Parameter<N>(Poly<N, B0>)
+pub struct Parameter<N>(Poly<N, (B0, B1, B1)>)
 where
     N: Packable;
 
@@ -60,8 +59,11 @@ pub trait Pke {
 impl<N> Pke for Parameter<N>
 where
     N: Packable,
-    Poly<N, B0>: FromSeed + Ntt<Output = Poly<N, B1>>,
-    Poly<N, B1>: Ntt<Output = Poly<N, B0>>,
+    Poly<N, (B0, B1, B1)>: FromSeed,
+    Poly<N, (B1, B0, B0)>: FromSeedSmall + Ntt<Output = Poly<N, (B0, B0, B1)>>,
+    Poly<N, (B0, B0, B1)>: Ntt + ReverseBits<Output = Poly<N, (B1, B0, B1)>>,
+    Poly<N, (B1, B0, B1)>: Ntt<Output = Poly<N, (B0, B0, B0)>> + ReverseBits,
+    Poly<N, (B0, B0, B0)>: FromSeed + Ntt,
 {
     type Seed = U32;
     type GenerationSeed = U32;
@@ -79,9 +81,9 @@ where
         &self,
         seed: &GenericArray<u8, Self::GenerationSeed>,
     ) -> (Self::PublicKey, Self::SecretKey) {
-        let s = Poly::<_, B1>::random_small(&seed.clone().into(), 0).ntt();
-        let e = Poly::<_, B1>::random_small(&seed.clone().into(), 1).ntt();
-        let b = Poly::functor_3(&e, &self.0, &s, |e, a, s| e + &(a * s));
+        let s = Poly::random_small(&seed.clone().into(), 0).ntt();
+        let e = Poly::random_small(&seed.clone().into(), 1).ntt();
+        let b = Poly::functor_3(&e, &self.0, &s, |e, a, s| e + a * s);
         (PublicKey(b), SecretKey(s))
     }
 
@@ -93,11 +95,11 @@ where
     ) -> (Self::PublicKey, GenericArray<u8, Self::Cipher>) {
         let v = Poly::from_message(&plain.clone().into());
         let (pk_b, sk_b) = self.generate(seed);
-        let e = Poly::random_small(&seed.clone().into(), 2);
+        let e = Poly::<_, (B0, B0, B0)>::random_small(&seed.clone().into(), 2);
         let dh = Poly::functor_2(&pk_a.0, &sk_b.0, |pk, sk| pk * sk)
             .reverse_bits()
             .inv_ntt();
-        let c = Poly::functor_3(&dh, &e, &v, |dh, e, v| &(dh + e) + v);
+        let c = Poly::functor_3(&dh, &e, &v, |dh, e, v| dh + e + v);
         (pk_b, c.compress())
     }
 
@@ -109,7 +111,7 @@ where
         let dh = Poly::functor_2(&pk_b.0, &sk_a.0, |pk, sk| pk * sk)
             .reverse_bits()
             .inv_ntt();
-        let c = Poly::decompress(cipher);
+        let c = Poly::<_, (B0, B0, B0)>::decompress(cipher);
         let v = Poly::functor_2(&dh, &c, |dh, c| dh - c);
         v.to_message_negate().into()
     }

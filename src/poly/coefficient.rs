@@ -1,4 +1,8 @@
-use core::ops::{Add, Sub, Mul};
+use core::{
+    ops::{Add, Sub, Mul, BitOr, BitAnd},
+    marker::PhantomData,
+};
+use super::poly::{PolyState, Involution};
 
 #[derive(Clone, Default, Debug)]
 pub struct Coefficient(u16);
@@ -102,5 +106,63 @@ impl<'a, 'b> Mul<&'b Coefficient> for &'a Coefficient {
     fn mul(self, other: &'b Coefficient) -> Self::Output {
         let t = Coefficient::montgomery_reduce(3186 * other.data());
         Coefficient::montgomery_reduce(t.data() * self.data())
+    }
+}
+
+pub struct CoefficientRich<S>(pub Coefficient, pub PhantomData<S>)
+where
+    S: PolyState;
+
+impl<S> CoefficientRich<S>
+where
+    S: PolyState,
+{
+    pub fn new(raw: u32) -> Self {
+        CoefficientRich(Coefficient::new(raw as u16), PhantomData)
+    }
+}
+
+impl<O, L, R, D> Add<CoefficientRich<(O, R, D)>> for CoefficientRich<(O, L, D)>
+where
+    O: Involution,
+    L: Involution + BitOr<R>,
+    <L as BitOr<R>>::Output: Involution,
+    R: Involution,
+    D: Involution,
+{
+    type Output = CoefficientRich<(O, <L as BitOr<R>>::Output, D)>;
+
+    fn add(self, other: CoefficientRich<(O, R, D)>) -> Self::Output {
+        CoefficientRich::new((&self.0 + &other.0).data())
+    }
+}
+
+impl<O, L, R, D> Sub<CoefficientRich<(O, R, D)>> for CoefficientRich<(O, L, D)>
+where
+    O: Involution,
+    L: Involution + BitOr<R>,
+    <L as BitOr<R>>::Output: Involution,
+    R: Involution,
+    D: Involution,
+{
+    type Output = CoefficientRich<(O, <L as BitOr<R>>::Output, D)>;
+
+    fn sub(self, other: CoefficientRich<(O, R, D)>) -> Self::Output {
+        CoefficientRich::new((&self.0 - &other.0).data())
+    }
+}
+
+impl<O, L, R, D> Mul<CoefficientRich<(O, R, D)>> for CoefficientRich<(O, L, D)>
+where
+    O: Involution,
+    L: Involution + BitAnd<R>,
+    <L as BitAnd<R>>::Output: Involution,
+    R: Involution,
+    D: Involution,
+{
+    type Output = CoefficientRich<(O, <L as BitAnd<R>>::Output, D)>;
+
+    fn mul(self, other: CoefficientRich<(O, R, D)>) -> Self::Output {
+        CoefficientRich::new((&self.0 * &other.0).data())
     }
 }

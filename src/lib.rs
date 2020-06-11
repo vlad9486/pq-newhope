@@ -3,7 +3,6 @@
 pub extern crate generic_array;
 
 #[cfg(any(test, feature = "smallest"))]
-#[macro_use]
 extern crate std;
 
 mod hash;
