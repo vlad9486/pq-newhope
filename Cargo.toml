@@ -1,6 +1,6 @@
 [package]
 name = "pq-newhope"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Vladislav Melnik <vladislav.melnik@protonmail.com>"]
 edition = "2018"
 description = "NewHope is a key-exchange protocol based on the Ring-Learning-with-Errors (Ring-LWE) problem, which was submitted to the NIST post-quantum crypto project. "
