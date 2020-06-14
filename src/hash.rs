@@ -3,10 +3,10 @@ use generic_array::{GenericArray, typenum::U32};
 pub fn shake256(data: &[u8], buffer: &mut [u8]) {
     use sha3::{
         Shake256,
-        digest::{Input, ExtendableOutput, XofReader},
+        digest::{Update, ExtendableOutput, XofReader},
     };
 
-    Shake256::default().chain(data).xof_result().read(buffer)
+    Shake256::default().chain(data).finalize_xof().read(buffer)
 }
 
 pub fn expand(
