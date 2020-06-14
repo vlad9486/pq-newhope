@@ -1,12 +1,15 @@
 use super::{
     hash,
     poly::PolySize,
-    pke::{Codable, Pke, PublicKey, SecretKey, Parameter},
+    pke::{Pke, PublicKey, SecretKey, Parameter},
 };
 use core::{marker::PhantomData, ops::Add};
-use rac::generic_array::{
-    GenericArray, ArrayLength,
-    typenum::{U32, U64},
+use rac::{
+    LineValid,
+    generic_array::{
+        GenericArray, ArrayLength,
+        typenum::{U32, U64},
+    },
 };
 
 pub struct Cca<N>(PhantomData<N>)
@@ -51,7 +54,8 @@ impl<N> Cca<N>
 where
     N: PolySize,
     N::PackedLength: Add<U32>,
-    PublicKeyCca<N>: Clone,
+    PublicKeyCca<N>: Clone + LineValid,
+    CipherTextCca<N>: LineValid,
     PkLength<N>: ArrayLength<u8> + Add<N::CompressedLength>,
     CtLength<N>: ArrayLength<u8>,
     Parameter<N>: Pke<
@@ -63,22 +67,6 @@ where
         SecretKey = SecretKey<N>,
     >,
 {
-    fn public_key_hash(pk: &PublicKeyCca<N>) -> GenericArray<u8, U32> {
-        let mut pk_hash = GenericArray::default();
-        let mut pk_bytes = GenericArray::<u8, PkLength<N>>::default();
-        pk.encode(pk_bytes.as_mut());
-        hash::shake256(pk_bytes.as_ref(), pk_hash.as_mut());
-        pk_hash
-    }
-
-    fn cipher_text_hash(ct: &CipherTextCca<N>) -> GenericArray<u8, U32> {
-        let mut ct_hash = GenericArray::default();
-        let mut ct_bytes = GenericArray::<u8, CtLength<N>>::default();
-        ct.encode(ct_bytes.as_mut());
-        hash::shake256(ct_bytes.as_ref(), ct_hash.as_mut());
-        ct_hash
-    }
-
     pub fn generate(seed: &GenericArray<u8, U64>) -> (PublicKeyCca<N>, SecretKeyCca<N>) {
         let mut reject = GenericArray::default();
         reject.clone_from_slice(seed[..32].as_ref());
@@ -92,7 +80,9 @@ where
             parameter: parameter,
             seed: parameter_seed,
         };
-        let pk_hash = Self::public_key_hash(&public_key);
+        let mut pk_hash = GenericArray::default();
+        let pk_bytes = public_key.clone_line();
+        hash::shake256(pk_bytes.as_ref(), pk_hash.as_mut());
         (
             public_key.clone(),
             SecretKeyCca {
@@ -115,8 +105,9 @@ where
         let mut new_seed = [0; 0x41];
         new_seed[0x00] = 0x08;
         hash::shake256(ext_seed.as_ref(), &mut new_seed[0x01..0x21]);
-        let public_key_hash = Self::public_key_hash(&public_key);
-        new_seed[0x21..0x41].clone_from_slice(public_key_hash.as_ref());
+
+        let public_key_bytes = public_key.clone_line();
+        hash::shake256(public_key_bytes.as_ref(), new_seed[0x21..0x41].as_mut());
 
         let mut buffer = [0; 0x60];
         hash::shake256(new_seed.as_ref(), buffer.as_mut());
@@ -137,8 +128,8 @@ where
             ct: ct,
             check: hash,
         };
-        let ct_hash = Self::cipher_text_hash(&cipher_text);
-        buffer[0x20..0x40].clone_from_slice(ct_hash.as_ref());
+        let cipher_text_bytes = cipher_text.clone_line();
+        hash::shake256(cipher_text_bytes.as_ref(), buffer[0x20..0x40].as_mut());
 
         let mut shared_secret = GenericArray::default();
         hash::shake256(buffer[0x00..0x40].as_ref(), shared_secret.as_mut());
@@ -187,10 +178,8 @@ where
             check: hash,
         };
 
-        let mut cipher_text_bytes = GenericArray::<u8, CtLength<N>>::default();
-        cipher_text.encode(cipher_text_bytes.as_mut());
-        let mut cipher_text_cmp_bytes = GenericArray::<u8, CtLength<N>>::default();
-        cipher_text_cmp.encode(cipher_text_cmp_bytes.as_mut());
+        let cipher_text_bytes = cipher_text.clone_line();
+        let cipher_text_cmp_bytes = cipher_text_cmp.clone_line();
         let fail = c_cmp(cipher_text_bytes.as_ref(), cipher_text_cmp_bytes.as_ref());
         let fail = if fail == 0 { 0 } else { 0xff };
         hash::shake256(cipher_text_bytes.as_ref(), buffer[0x20..0x40].as_mut());
@@ -209,112 +198,101 @@ where
 mod codable {
     #[rustfmt::skip]
     use super::{
-        Codable, PolySize, Parameter, Pke,
+        PolySize, Parameter, Pke,
         PublicKeyCca, PublicKey,
         SecretKeyCca, SecretKey,
         CipherTextCca,
     };
-    use rac::generic_array::{
-        GenericArray,
-        typenum::{Unsigned, U32},
+    use rac::{
+        LineValid,
+        Concat,
+        generic_array::{
+            GenericArray,
+            typenum::U32,
+        },
     };
 
-    impl<N> Codable for PublicKeyCca<N>
+    type PkBytes<N> = Concat<PublicKey<N>, GenericArray<u8, <Parameter<N> as Pke>::Seed>>;
+    type SkHashes = Concat<GenericArray<u8, U32>, GenericArray<u8, U32>>;
+    type SkBytes<N> = Concat<Concat<SecretKey<N>, PublicKeyCca<N>>, SkHashes>;
+    type CtTemp<N> = Concat<PublicKey<N>, GenericArray<u8, <N as PolySize>::CompressedLength>>;
+    type CtBytes<N> = Concat<CtTemp<N>, GenericArray<u8, U32>>;
+
+    impl<N> LineValid for PublicKeyCca<N>
     where
         N: PolySize,
         Parameter<N>: Pke<Seed = U32>,
-        PublicKey<N>: Codable,
+        PublicKey<N>: Clone + LineValid,
+        PkBytes<N>: LineValid,
     {
-        const SIZE: usize = PublicKey::<N>::SIZE + 32;
+        type Length = <PkBytes<N> as LineValid>::Length;
 
-        fn encode(&self, buffer: &mut [u8]) {
-            let m = N::PackedLength::USIZE;
-            self.pk.encode(buffer[..m].as_mut());
-            buffer[m..].clone_from_slice(self.seed.as_ref());
+        fn try_clone_array(a: &GenericArray<u8, Self::Length>) -> Result<Self, ()> {
+            PkBytes::try_clone_array(a)
+                .map(|Concat(pk, seed)| {
+                    PublicKeyCca {
+                        pk: pk,
+                        parameter: Parameter::new(&seed),
+                        seed: seed,
+                    }
+                })
         }
 
-        fn decode(buffer: &[u8]) -> Result<Self, ()> {
-            let m = N::PackedLength::USIZE;
-            PublicKey::decode(buffer[..m].as_ref()).map(|inner| {
-                let mut seed = GenericArray::default();
-                seed.clone_from_slice(buffer[m..].as_ref());
-                PublicKeyCca {
-                    pk: inner,
-                    parameter: Parameter::new(&seed),
-                    seed: seed,
+        fn clone_line(&self) -> GenericArray<u8, Self::Length> {
+            Concat(self.pk.clone(), self.seed.clone()).clone_line()
+        }
+    }
+
+    impl<N> LineValid for SecretKeyCca<N>
+    where
+        N: PolySize,
+        SecretKey<N>: Clone + LineValid,
+        PublicKeyCca<N>: Clone + LineValid,
+        Concat<SecretKey<N>, PublicKeyCca<N>>: LineValid,
+        SkBytes<N>: LineValid,
+    {
+        type Length = <SkBytes<N> as LineValid>::Length;
+        
+        fn try_clone_array(a: &GenericArray<u8, Self::Length>) -> Result<Self, ()> {
+            SkBytes::try_clone_array(a).map(|Concat(Concat(sk, pk), Concat(pk_hash, reject))| {
+                SecretKeyCca {
+                    sk: sk,
+                    pk: pk,
+                    pk_hash: pk_hash,
+                    reject: reject,
                 }
             })
         }
-    }
 
-    impl<N> Codable for SecretKeyCca<N>
-    where
-        N: PolySize,
-        SecretKey<N>: Codable,
-        PublicKeyCca<N>: Codable,
-    {
-        const SIZE: usize = SecretKey::<N>::SIZE;
-
-        fn encode(&self, buffer: &mut [u8]) {
-            let m = N::PackedLength::USIZE;
-            let n = m + <PublicKeyCca<N> as Codable>::SIZE;
-            let o = n + 32;
-            self.sk.encode(buffer[..m].as_mut());
-            self.pk.encode(buffer[m..n].as_mut());
-            buffer[n..o].clone_from_slice(self.pk_hash.as_ref());
-            buffer[o..].clone_from_slice(self.reject.as_ref());
-        }
-
-        fn decode(buffer: &[u8]) -> Result<Self, ()> {
-            let m = N::PackedLength::USIZE;
-            let n = m + <PublicKeyCca<N> as Codable>::SIZE;
-            let o = n + 32;
-            SecretKey::decode(buffer[..m].as_ref()).and_then(|sk| {
-                PublicKeyCca::decode(buffer[m..n].as_ref()).map(|pk| {
-                    let mut pk_hash = GenericArray::default();
-                    pk_hash.clone_from_slice(buffer[n..o].as_ref());
-                    let mut reject = GenericArray::default();
-                    reject.clone_from_slice(buffer[o..].as_ref());
-                    SecretKeyCca {
-                        sk: sk,
-                        pk: pk,
-                        pk_hash: pk_hash,
-                        reject: reject,
-                    }
-                })
-            })
+        fn clone_line(&self) -> GenericArray<u8, Self::Length> {
+            Concat(
+                Concat(self.sk.clone(), self.pk.clone()),
+                Concat(self.pk_hash.clone(), self.reject.clone()),
+            ).clone_line()
         }
     }
 
-    impl<N> Codable for CipherTextCca<N>
+    impl<N> LineValid for CipherTextCca<N>
     where
         N: PolySize,
-        PublicKey<N>: Codable,
+        PublicKey<N>: Clone + LineValid,
+        CtTemp<N>: LineValid,
+        CtBytes<N>: LineValid,
     {
-        const SIZE: usize = PublicKey::<N>::SIZE + N::CompressedLength::USIZE + 32;
+        type Length = <CtBytes<N> as LineValid>::Length;
 
-        fn encode(&self, buffer: &mut [u8]) {
-            let m = N::PackedLength::USIZE;
-            let n = m + N::CompressedLength::USIZE;
-            self.pk.encode(buffer[..m].as_mut());
-            buffer[m..n].clone_from_slice(self.ct.as_ref());
-            buffer[n..].clone_from_slice(self.check.as_ref());
-        }
-
-        fn decode(buffer: &[u8]) -> Result<Self, ()> {
-            let m = N::PackedLength::USIZE;
-            let n = m + N::CompressedLength::USIZE;
-            PublicKey::decode(buffer[..m].as_ref()).map(|pk| {
-                let mut inner = GenericArray::default();
-                inner.clone_from_slice(buffer[m..n].as_ref());
-                let mut check = GenericArray::default();
-                check.clone_from_slice(buffer[n..].as_ref());
+        fn try_clone_array(a: &GenericArray<u8, Self::Length>) -> Result<Self, ()> {
+            CtBytes::try_clone_array(a).map(|Concat(Concat(pk, ct), check)| {
                 CipherTextCca {
                     pk: pk,
-                    ct: inner,
+                    ct: ct,
                     check: check,
                 }
             })
+        }
+
+        fn clone_line(&self) -> GenericArray<u8, Self::Length> {
+            Concat(Concat(self.pk.clone(), self.ct.clone()), self.check.clone()).clone_line()
         }
     }
 }

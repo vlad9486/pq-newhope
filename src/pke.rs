@@ -1,7 +1,10 @@
 use super::poly::{Poly, PolySize, FromSeed, FromSeedSmall, ReverseBits, Ntt};
-use rac::generic_array::{
-    GenericArray, ArrayLength,
-    typenum::{U32, B0, B1},
+use rac::{
+    LineValid,
+    generic_array::{
+        GenericArray, ArrayLength,
+        typenum::{U32, B0, B1},
+    },
 };
 
 #[derive(Clone)]
@@ -19,24 +22,13 @@ pub struct Parameter<N>(Poly<N, (B0, B1, B1)>)
 where
     N: PolySize;
 
-// TODO: compile-time length check
-pub trait Codable
-where
-    Self: Sized,
-{
-    const SIZE: usize;
-
-    fn encode(&self, buffer: &mut [u8]);
-    fn decode(buffer: &[u8]) -> Result<Self, ()>;
-}
-
 pub trait Pke {
     type Seed: ArrayLength<u8>;
     type GenerationSeed: ArrayLength<u8>;
     type Plain: ArrayLength<u8>;
     type Cipher: ArrayLength<u8>;
-    type PublicKey: Sized + Codable;
-    type SecretKey: Sized + Codable;
+    type PublicKey: LineValid;
+    type SecretKey: LineValid;
 
     fn new(seed: &GenericArray<u8, Self::Seed>) -> Self;
     fn generate(
@@ -117,40 +109,36 @@ where
 }
 
 mod codable {
-    use super::{Codable, Poly, PolySize, PublicKey, SecretKey};
-    use rac::generic_array::{GenericArray, typenum::Unsigned};
+    use super::{LineValid, Poly, PolySize, PublicKey, SecretKey};
+    use rac::generic_array::GenericArray;
 
-    impl<N> Codable for PublicKey<N>
+    impl<N> LineValid for PublicKey<N>
     where
         N: PolySize,
     {
-        const SIZE: usize = N::PackedLength::USIZE;
+        type Length = N::PackedLength;
 
-        fn encode(&self, buffer: &mut [u8]) {
-            buffer.clone_from_slice(self.0.pack().as_ref());
+        fn try_clone_array(a: &GenericArray<u8, Self::Length>) -> Result<Self, ()> {
+            Poly::unpack(a).map(PublicKey)
         }
 
-        fn decode(buffer: &[u8]) -> Result<Self, ()> {
-            let mut v = GenericArray::default();
-            v.clone_from_slice(buffer);
-            Poly::unpack(&v).map(PublicKey)
+        fn clone_line(&self) -> GenericArray<u8, Self::Length> {
+            self.0.pack()
         }
     }
 
-    impl<N> Codable for SecretKey<N>
+    impl<N> LineValid for SecretKey<N>
     where
         N: PolySize,
     {
-        const SIZE: usize = N::PackedLength::USIZE;
+        type Length = N::PackedLength;
 
-        fn encode(&self, buffer: &mut [u8]) {
-            buffer.clone_from_slice(self.0.pack().as_ref());
+        fn try_clone_array(a: &GenericArray<u8, Self::Length>) -> Result<Self, ()> {
+            Poly::unpack(a).map(SecretKey)
         }
 
-        fn decode(buffer: &[u8]) -> Result<Self, ()> {
-            let mut v = GenericArray::default();
-            v.clone_from_slice(buffer);
-            Poly::unpack(&v).map(SecretKey)
+        fn clone_line(&self) -> GenericArray<u8, Self::Length> {
+            self.0.pack()
         }
     }
 }
