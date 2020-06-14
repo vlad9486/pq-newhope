@@ -1,5 +1,5 @@
 use super::poly::{Poly, PolySize, FromSeed, FromSeedSmall, ReverseBits, Ntt};
-use generic_array::{
+use rac::generic_array::{
     GenericArray, ArrayLength,
     typenum::{U32, B0, B1},
 };
@@ -118,7 +118,7 @@ where
 
 mod codable {
     use super::{Codable, Poly, PolySize, PublicKey, SecretKey};
-    use generic_array::{GenericArray, typenum::Unsigned};
+    use rac::generic_array::{GenericArray, typenum::Unsigned};
 
     impl<N> Codable for PublicKey<N>
     where

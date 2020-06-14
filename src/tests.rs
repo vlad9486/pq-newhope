@@ -3,7 +3,7 @@ use crate::{
     cca::Cca,
     pke::{Pke, Parameter},
 };
-use generic_array::{GenericArray, sequence::GenericSequence, typenum::U1024};
+use rac::generic_array::{GenericArray, sequence::GenericSequence, typenum::U1024};
 use wasm_bindgen_test::*;
 
 #[wasm_bindgen_test]

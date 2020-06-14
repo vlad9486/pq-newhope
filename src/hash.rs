@@ -1,4 +1,4 @@
-use generic_array::{GenericArray, typenum::U32};
+use rac::generic_array::{GenericArray, typenum::U32};
 
 pub fn shake256(data: &[u8], buffer: &mut [u8]) {
     use sha3::{

@@ -1,6 +1,6 @@
 #![no_std]
 
-pub extern crate generic_array;
+pub use rac::generic_array;
 
 #[cfg(any(test, feature = "smallest"))]
 extern crate std;

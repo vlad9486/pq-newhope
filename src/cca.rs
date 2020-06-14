@@ -4,7 +4,7 @@ use super::{
     pke::{Codable, Pke, PublicKey, SecretKey, Parameter},
 };
 use core::{marker::PhantomData, ops::Add};
-use generic_array::{
+use rac::generic_array::{
     GenericArray, ArrayLength,
     typenum::{U32, U64},
 };
@@ -214,7 +214,7 @@ mod codable {
         SecretKeyCca, SecretKey,
         CipherTextCca,
     };
-    use generic_array::{
+    use rac::generic_array::{
         GenericArray,
         typenum::{Unsigned, U32},
     };

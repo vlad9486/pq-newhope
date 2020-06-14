@@ -7,7 +7,7 @@ use pq_newhope::{
     cpa::Cpa,
     cca::Cca,
 };
-use generic_array::{
+use rac::generic_array::{
     GenericArray,
     sequence::GenericSequence,
     typenum::{U32, U64, U1024, B0},

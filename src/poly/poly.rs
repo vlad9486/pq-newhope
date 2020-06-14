@@ -4,7 +4,7 @@ use core::{
     marker::PhantomData,
     ops::{Mul, Div, Not},
 };
-use generic_array::{
+use rac::generic_array::{
     GenericArray, ArrayLength,
     typenum::{Unsigned, U8, U14, U3, U1024, U32, Bit, B0, PowerOfTwo, Logarithm2},
 };
@@ -463,7 +463,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::{Poly, FromSeed, ReverseBits, Ntt};
-    use generic_array::{
+    use rac::generic_array::{
         GenericArray,
         sequence::GenericSequence,
         typenum::{U1024, B0, B1},

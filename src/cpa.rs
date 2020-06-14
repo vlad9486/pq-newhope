@@ -4,7 +4,7 @@ use super::{
     pke::{Codable, Pke, PublicKey, SecretKey, Parameter},
 };
 use core::marker::PhantomData;
-use generic_array::{GenericArray, typenum::U32};
+use rac::generic_array::{GenericArray, typenum::U32};
 
 pub struct Cpa<N>(PhantomData<N>)
 where
@@ -96,7 +96,7 @@ mod codable {
         SecretKeyCpa, SecretKey,
         CipherTextCpa,
     };
-    use generic_array::{
+    use rac::generic_array::{
         GenericArray,
         typenum::{Unsigned, U32},
     };
