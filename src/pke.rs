@@ -1,4 +1,4 @@
-use super::poly::{Poly, Packable, FromSeed, FromSeedSmall, ReverseBits, Ntt};
+use super::poly::{Poly, PolySize, FromSeed, FromSeedSmall, ReverseBits, Ntt};
 use generic_array::{
     GenericArray, ArrayLength,
     typenum::{U32, B0, B1},
@@ -7,17 +7,17 @@ use generic_array::{
 #[derive(Clone)]
 pub struct PublicKey<N>(Poly<N, (B0, B0, B1)>)
 where
-    N: Packable;
+    N: PolySize;
 
 #[derive(Clone)]
 pub struct SecretKey<N>(Poly<N, (B0, B0, B1)>)
 where
-    N: Packable;
+    N: PolySize;
 
 #[derive(Clone)]
 pub struct Parameter<N>(Poly<N, (B0, B1, B1)>)
 where
-    N: Packable;
+    N: PolySize;
 
 // TODO: compile-time length check
 pub trait Codable
@@ -58,7 +58,7 @@ pub trait Pke {
 
 impl<N> Pke for Parameter<N>
 where
-    N: Packable,
+    N: PolySize,
     Poly<N, (B0, B1, B1)>: FromSeed,
     Poly<N, (B1, B0, B0)>: FromSeedSmall + Ntt<Output = Poly<N, (B0, B0, B1)>>,
     Poly<N, (B0, B0, B1)>: Ntt + ReverseBits<Output = Poly<N, (B1, B0, B1)>>,
@@ -73,16 +73,15 @@ where
     type SecretKey = SecretKey<N>;
 
     fn new(seed: &GenericArray<u8, Self::Seed>) -> Self {
-        // TODO: AsRef for GenericArray
-        Parameter(Poly::random(&seed.clone().into()))
+        Parameter(Poly::random(seed))
     }
 
     fn generate(
         &self,
         seed: &GenericArray<u8, Self::GenerationSeed>,
     ) -> (Self::PublicKey, Self::SecretKey) {
-        let s = Poly::random_small(&seed.clone().into(), 0).ntt();
-        let e = Poly::random_small(&seed.clone().into(), 1).ntt();
+        let s = Poly::random_small(seed, 0).ntt();
+        let e = Poly::random_small(seed, 1).ntt();
         let b = Poly::functor_3(&e, &self.0, &s, |e, a, s| e + a * s);
         (PublicKey(b), SecretKey(s))
     }
@@ -93,9 +92,9 @@ where
         pk_a: &Self::PublicKey,
         plain: &GenericArray<u8, Self::Plain>,
     ) -> (Self::PublicKey, GenericArray<u8, Self::Cipher>) {
-        let v = Poly::from_message(&plain.clone().into());
+        let v = Poly::from_message(plain);
         let (pk_b, sk_b) = self.generate(seed);
-        let e = Poly::<_, (B0, B0, B0)>::random_small(&seed.clone().into(), 2);
+        let e = Poly::<_, (B0, B0, B0)>::random_small(seed, 2);
         let dh = Poly::functor_2(&pk_a.0, &sk_b.0, |pk, sk| pk * sk)
             .reverse_bits()
             .inv_ntt();
@@ -118,12 +117,12 @@ where
 }
 
 mod codable {
-    use super::{Codable, Poly, Packable, PublicKey, SecretKey};
+    use super::{Codable, Poly, PolySize, PublicKey, SecretKey};
     use generic_array::{GenericArray, typenum::Unsigned};
 
     impl<N> Codable for PublicKey<N>
     where
-        N: Packable,
+        N: PolySize,
     {
         const SIZE: usize = N::PackedLength::USIZE;
 
@@ -140,7 +139,7 @@ mod codable {
 
     impl<N> Codable for SecretKey<N>
     where
-        N: Packable,
+        N: PolySize,
     {
         const SIZE: usize = N::PackedLength::USIZE;
 

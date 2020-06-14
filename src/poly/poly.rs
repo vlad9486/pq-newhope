@@ -6,127 +6,25 @@ use core::{
 };
 use generic_array::{
     GenericArray, ArrayLength,
-    typenum::{Unsigned, U8, U14, U3, U1024, Bit, B0, PowerOfTwo, Logarithm2},
+    typenum::{Unsigned, U8, U14, U3, U1024, U32, Bit, B0, PowerOfTwo, Logarithm2},
 };
 
-pub trait Packable {
-    type PolyLength: ArrayLength<Coefficient>;
+pub trait PolySize {
+    type PolyLength: ArrayLength<Coefficient> + Unsigned;
     type PackedLength: ArrayLength<u8>;
     type CompressedLength: ArrayLength<u8>;
-
-    fn pack(
-        v: &GenericArray<Coefficient, Self::PolyLength>,
-    ) -> GenericArray<u8, Self::PackedLength>;
-
-    fn unpack(
-        v: &GenericArray<u8, Self::PackedLength>,
-    ) -> Result<GenericArray<Coefficient, Self::PolyLength>, ()>;
-
-    fn compress(
-        v: &GenericArray<Coefficient, Self::PolyLength>,
-    ) -> GenericArray<u8, Self::CompressedLength>;
-
-    fn decompress(
-        v: &GenericArray<u8, Self::CompressedLength>,
-    ) -> GenericArray<Coefficient, Self::PolyLength>;
 }
 
-impl<N> Packable for N
+impl<N> PolySize for N
 where
     N: Div<U8> + PowerOfTwo + ArrayLength<Coefficient> + Unsigned,
     <N as Div<U8>>::Output: Mul<U14> + Mul<U3>,
-    <<N as Div<U8>>::Output as Mul<U14>>::Output: ArrayLength<u8> + Unsigned,
-    <<N as Div<U8>>::Output as Mul<U3>>::Output: ArrayLength<u8> + Unsigned,
+    <<N as Div<U8>>::Output as Mul<U14>>::Output: ArrayLength<u8>,
+    <<N as Div<U8>>::Output as Mul<U3>>::Output: ArrayLength<u8>,
 {
     type PolyLength = N;
     type PackedLength = <<N as Div<U8>>::Output as Mul<U14>>::Output;
     type CompressedLength = <<N as Div<U8>>::Output as Mul<U3>>::Output;
-
-    fn pack(
-        v: &GenericArray<Coefficient, Self::PolyLength>,
-    ) -> GenericArray<u8, Self::PackedLength> {
-        let mut r = GenericArray::default();
-
-        for i in 0..(N::USIZE / 4) {
-            let mut t = [0; 4];
-            for j in 0..4 {
-                t[j] = v[4 * i + j].freeze() as u16;
-            }
-
-            let r = &mut r[(7 * i)..(7 * (i + 1))];
-            r[0] = (t[0] & 0x00ff) as u8;
-            r[1] = ((t[0] >> 0x8) | (t[1] << 0x6)) as u8;
-            r[2] = (t[1] >> 0x2) as u8;
-            r[3] = ((t[1] >> 0xa) | (t[2] << 0x4)) as u8;
-            r[4] = (t[2] >> 0x4) as u8;
-            r[5] = ((t[2] >> 0xc) | (t[3] << 0x2)) as u8;
-            r[6] = (t[3] >> 0x6) as u8;
-        }
-
-        r
-    }
-
-    fn unpack(
-        v: &GenericArray<u8, Self::PackedLength>,
-    ) -> Result<GenericArray<Coefficient, Self::PolyLength>, ()> {
-        let mut c = GenericArray::default();
-
-        for i in 0..(N::USIZE / 4) {
-            let a = |j| v[7 * i + j] as u16;
-            let c = &mut c[(4 * i)..(4 * (i + 1))];
-
-            c[0] = Coefficient::valid_new((0x00 >> 0x8) | (a(0) << 0x0) | ((a(1) & 0x3f) << 0x8))?;
-            c[1] = Coefficient::valid_new((a(1) >> 0x6) | (a(2) << 0x2) | ((a(3) & 0x0f) << 0xa))?;
-            c[2] = Coefficient::valid_new((a(3) >> 0x4) | (a(4) << 0x4) | ((a(5) & 0x03) << 0xc))?;
-            c[3] = Coefficient::valid_new((a(5) >> 0x2) | (a(6) << 0x6) | ((0x00 & 0x00) << 0xe))?;
-        }
-
-        Ok(c)
-    }
-
-    fn compress(
-        v: &GenericArray<Coefficient, Self::PolyLength>,
-    ) -> GenericArray<u8, Self::CompressedLength> {
-        let mut a = GenericArray::default();
-
-        for i in 0..(N::USIZE / 8) {
-            let mut t = [0; 8];
-            for j in 0..8 {
-                t[j] = v[8 * i + j].compress()
-            }
-
-            a[3 * i + 0] = (t[0] >> 0x0) | (t[1] << 0x3) | (t[2] << 0x6);
-            a[3 * i + 1] = (t[2] >> 0x2) | (t[3] << 0x1) | (t[4] << 0x4) | (t[5] << 0x7);
-            a[3 * i + 2] = (t[5] >> 0x1) | (t[6] << 0x2) | (t[7] << 0x5);
-        }
-
-        a
-    }
-
-    fn decompress(
-        v: &GenericArray<u8, Self::CompressedLength>,
-    ) -> GenericArray<Coefficient, Self::PolyLength> {
-        let mut c = GenericArray::default();
-
-        for i in 0..(N::USIZE / 8) {
-            let a = &v[(3 * i)..(3 * (i + 1))];
-            let t = [
-                a[0] & 0x07,
-                (a[0] >> 0x3) & 0x07,
-                (a[0] >> 0x6) | ((a[1] << 0x2) & 0x04),
-                (a[1] >> 0x1) & 0x07,
-                (a[1] >> 0x4) & 0x07,
-                (a[1] >> 0x7) | ((a[2] << 0x1) & 0x06),
-                (a[2] >> 0x2) & 0x07,
-                (a[2] >> 0x5),
-            ];
-            for j in 0..8 {
-                c[8 * i + j] = Coefficient::decompress(t[j]);
-            }
-        }
-
-        c
-    }
 }
 
 pub trait Involution
@@ -164,7 +62,7 @@ where
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub struct Poly<N, S>
 where
-    N: Packable,
+    N: PolySize,
     S: PolyState,
 {
     coefficients: GenericArray<Coefficient, N::PolyLength>,
@@ -173,7 +71,7 @@ where
 
 impl<N, S> Poly<N, S>
 where
-    N: Packable,
+    N: PolySize,
     S: PolyState,
 {
     const BLOCK_SIZE: usize = 1 << 6;
@@ -186,19 +84,81 @@ where
     }
 
     pub fn pack(&self) -> GenericArray<u8, N::PackedLength> {
-        N::pack(&self.coefficients)
+        let mut r = GenericArray::default();
+
+        for i in 0..(N::PolyLength::USIZE / 4) {
+            let mut t = [0; 4];
+            for j in 0..4 {
+                t[j] = self.coefficients[4 * i + j].freeze() as u16;
+            }
+
+            let r = &mut r[(7 * i)..(7 * (i + 1))];
+            r[0] = (t[0] & 0x00ff) as u8;
+            r[1] = ((t[0] >> 0x8) | (t[1] << 0x6)) as u8;
+            r[2] = (t[1] >> 0x2) as u8;
+            r[3] = ((t[1] >> 0xa) | (t[2] << 0x4)) as u8;
+            r[4] = (t[2] >> 0x4) as u8;
+            r[5] = ((t[2] >> 0xc) | (t[3] << 0x2)) as u8;
+            r[6] = (t[3] >> 0x6) as u8;
+        }
+
+        r
     }
 
     pub fn unpack(v: &GenericArray<u8, N::PackedLength>) -> Result<Self, ()> {
-        N::unpack(v).map(Self::new)
+        let mut c = GenericArray::default();
+
+        for i in 0..(N::PolyLength::USIZE / 4) {
+            let a = |j| v[7 * i + j] as u16;
+            let c = &mut c[(4 * i)..(4 * (i + 1))];
+
+            c[0] = Coefficient::valid_new((0x00 >> 0x8) | (a(0) << 0x0) | ((a(1) & 0x3f) << 0x8))?;
+            c[1] = Coefficient::valid_new((a(1) >> 0x6) | (a(2) << 0x2) | ((a(3) & 0x0f) << 0xa))?;
+            c[2] = Coefficient::valid_new((a(3) >> 0x4) | (a(4) << 0x4) | ((a(5) & 0x03) << 0xc))?;
+            c[3] = Coefficient::valid_new((a(5) >> 0x2) | (a(6) << 0x6) | ((0x00 & 0x00) << 0xe))?;
+        }
+
+        Ok(Self::new(c))
     }
 
     pub fn compress(&self) -> GenericArray<u8, N::CompressedLength> {
-        N::compress(&self.coefficients)
+        let mut a = GenericArray::default();
+
+        for i in 0..(N::PolyLength::USIZE / 8) {
+            let mut t = [0; 8];
+            for j in 0..8 {
+                t[j] = self.coefficients[8 * i + j].compress()
+            }
+
+            a[3 * i + 0] = (t[0] >> 0x0) | (t[1] << 0x3) | (t[2] << 0x6);
+            a[3 * i + 1] = (t[2] >> 0x2) | (t[3] << 0x1) | (t[4] << 0x4) | (t[5] << 0x7);
+            a[3 * i + 2] = (t[5] >> 0x1) | (t[6] << 0x2) | (t[7] << 0x5);
+        }
+
+        a
     }
 
     pub fn decompress(v: &GenericArray<u8, N::CompressedLength>) -> Self {
-        Self::new(N::decompress(v))
+        let mut c = GenericArray::default();
+
+        for i in 0..(N::PolyLength::USIZE / 8) {
+            let a = &v[(3 * i)..(3 * (i + 1))];
+            let t = [
+                a[0] & 0x07,
+                (a[0] >> 0x3) & 0x07,
+                (a[0] >> 0x6) | ((a[1] << 0x2) & 0x04),
+                (a[1] >> 0x1) & 0x07,
+                (a[1] >> 0x4) & 0x07,
+                (a[1] >> 0x7) | ((a[2] << 0x1) & 0x06),
+                (a[2] >> 0x2) & 0x07,
+                (a[2] >> 0x5),
+            ];
+            for j in 0..8 {
+                c[8 * i + j] = Coefficient::decompress(t[j]);
+            }
+        }
+
+        Self::new(c)
     }
 
     pub fn functor_2<F, S0, S1>(a: &Poly<N, S0>, b: &Poly<N, S1>, f: F) -> Self
@@ -241,21 +201,21 @@ where
 }
 
 pub trait FromSeed {
-    fn from_message(message: &[u8; 32]) -> Self;
-    fn to_message_negate(&self) -> [u8; 32];
-    fn random(seed: &[u8; 32]) -> Self;
+    fn from_message(message: &GenericArray<u8, U32>) -> Self;
+    fn to_message_negate(&self) -> GenericArray<u8, U32>;
+    fn random(seed: &GenericArray<u8, U32>) -> Self;
 }
 
 pub trait FromSeedSmall {
-    fn random_small(seed: &[u8; 32], nonce: u8) -> Self;
+    fn random_small(seed: &GenericArray<u8, U32>, nonce: u8) -> Self;
 }
 
 impl<N, S> FromSeed for Poly<N, S>
 where
-    N: Packable,
+    N: PolySize,
     S: PolyState,
 {
-    fn from_message(message: &[u8; 32]) -> Self {
+    fn from_message(message: &GenericArray<u8, U32>) -> Self {
         let mut c = GenericArray::default();
 
         for i in 0..N::PolyLength::USIZE {
@@ -268,10 +228,10 @@ where
         Self::new(c)
     }
 
-    fn to_message_negate(&self) -> [u8; 32] {
+    fn to_message_negate(&self) -> GenericArray<u8, U32> {
         const BITS: usize = 256;
         let mut t = [0; BITS];
-        let mut message = [0; 32];
+        let mut message = GenericArray::default();
 
         for i in 0..N::PolyLength::USIZE {
             t[i % BITS] += self.coefficients[i].flip_abs() as u32;
@@ -287,7 +247,7 @@ where
         message
     }
 
-    fn random(seed: &[u8; 32]) -> Self {
+    fn random(seed: &GenericArray<u8, U32>) -> Self {
         use core::slice;
         use keccak::f1600;
 
@@ -329,13 +289,12 @@ where
     }
 }
 
-impl<N, BitOrder, Domain> FromSeedSmall for Poly<N, (BitOrder, B0, Domain)>
+impl<N, S> FromSeedSmall for Poly<N, S>
 where
-    N: Packable,
-    BitOrder: Involution,
-    Domain: Involution,
+    N: PolySize,
+    S: PolyState<Size = B0>,
 {
-    fn random_small(seed: &[u8; 32], nonce: u8) -> Self {
+    fn random_small(seed: &GenericArray<u8, U32>, nonce: u8) -> Self {
         let mut c = GenericArray::default();
 
         let mut ext_seed = [0; 34];
@@ -368,8 +327,8 @@ pub trait ReverseBits {
 
 impl<N, S> ReverseBits for Poly<N, S>
 where
-    N: Packable,
-    N::PolyLength: Unsigned + Logarithm2,
+    N: PolySize,
+    N::PolyLength: Logarithm2,
     <N::PolyLength as Logarithm2>::Output: Unsigned,
     S: PolyState,
 {
@@ -401,7 +360,7 @@ pub trait Ntt {
 
 fn multiply<N, S>(s: Poly<N, S>, gammas: &[u16]) -> Poly<N, S>
 where
-    N: Packable,
+    N: PolySize,
     S: PolyState,
 {
     let mut s = s;
@@ -504,12 +463,16 @@ where
 #[cfg(test)]
 mod tests {
     use super::{Poly, FromSeed, ReverseBits, Ntt};
-    use generic_array::typenum::{U1024, B0, B1};
+    use generic_array::{
+        GenericArray,
+        sequence::GenericSequence,
+        typenum::{U1024, B0, B1},
+    };
 
     #[cfg(feature = "smallest")]
     #[test]
     fn smallest() {
-        let poly = Poly::<U1024, (B0, B1, B0)>::random(&rand::random());
+        let poly = Poly::<U1024, (B0, B1, B0)>::random(&GenericArray::generate(|_| rand::random()));
         let dump = poly.smallest();
         let poly_new = Poly::<U1024, (B0, B1, B0)>::from_smallest(dump.as_ref());
         assert_eq!(poly, poly_new);
@@ -518,7 +481,7 @@ mod tests {
 
     #[test]
     fn ntt() {
-        let poly = Poly::<U1024, (B0, B1, B0)>::random(&rand::random());
+        let poly = Poly::<U1024, (B0, B1, B0)>::random(&GenericArray::generate(|_| rand::random()));
         let poly_new = poly.clone().ntt().reverse_bits().inv_ntt().reverse_bits();
 
         assert_eq!(poly.coefficients, poly_new.coefficients);

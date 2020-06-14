@@ -1,6 +1,6 @@
 use super::{
     hash,
-    poly::Packable,
+    poly::PolySize,
     pke::{Codable, Pke, PublicKey, SecretKey, Parameter},
 };
 use core::{marker::PhantomData, ops::Add};
@@ -11,12 +11,12 @@ use generic_array::{
 
 pub struct Cca<N>(PhantomData<N>)
 where
-    N: Packable;
+    N: PolySize;
 
 #[derive(Clone)]
 pub struct PublicKeyCca<N>
 where
-    N: Packable,
+    N: PolySize,
 {
     pk: PublicKey<N>,
     parameter: Parameter<N>,
@@ -26,7 +26,7 @@ where
 #[derive(Clone)]
 pub struct SecretKeyCca<N>
 where
-    N: Packable,
+    N: PolySize,
 {
     sk: SecretKey<N>,
     pk: PublicKeyCca<N>,
@@ -37,19 +37,19 @@ where
 #[derive(Clone)]
 pub struct CipherTextCca<N>
 where
-    N: Packable,
+    N: PolySize,
 {
     pk: PublicKey<N>,
     ct: GenericArray<u8, N::CompressedLength>,
     check: GenericArray<u8, U32>,
 }
 
-type PkLength<N> = <<N as Packable>::PackedLength as Add<U32>>::Output;
-type CtLength<N> = <PkLength<N> as Add<<N as Packable>::CompressedLength>>::Output;
+type PkLength<N> = <<N as PolySize>::PackedLength as Add<U32>>::Output;
+type CtLength<N> = <PkLength<N> as Add<<N as PolySize>::CompressedLength>>::Output;
 
 impl<N> Cca<N>
 where
-    N: Packable,
+    N: PolySize,
     N::PackedLength: Add<U32>,
     PublicKeyCca<N>: Clone,
     PkLength<N>: ArrayLength<u8> + Add<N::CompressedLength>,
@@ -209,7 +209,7 @@ where
 mod codable {
     #[rustfmt::skip]
     use super::{
-        Codable, Packable, Parameter, Pke,
+        Codable, PolySize, Parameter, Pke,
         PublicKeyCca, PublicKey,
         SecretKeyCca, SecretKey,
         CipherTextCca,
@@ -221,7 +221,7 @@ mod codable {
 
     impl<N> Codable for PublicKeyCca<N>
     where
-        N: Packable,
+        N: PolySize,
         Parameter<N>: Pke<Seed = U32>,
         PublicKey<N>: Codable,
     {
@@ -249,7 +249,7 @@ mod codable {
 
     impl<N> Codable for SecretKeyCca<N>
     where
-        N: Packable,
+        N: PolySize,
         SecretKey<N>: Codable,
         PublicKeyCca<N>: Codable,
     {
@@ -288,7 +288,7 @@ mod codable {
 
     impl<N> Codable for CipherTextCca<N>
     where
-        N: Packable,
+        N: PolySize,
         PublicKey<N>: Codable,
     {
         const SIZE: usize = PublicKey::<N>::SIZE + N::CompressedLength::USIZE + 32;

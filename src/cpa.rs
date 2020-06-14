@@ -1,6 +1,6 @@
 use super::{
     hash,
-    poly::Packable,
+    poly::PolySize,
     pke::{Codable, Pke, PublicKey, SecretKey, Parameter},
 };
 use core::marker::PhantomData;
@@ -8,12 +8,12 @@ use generic_array::{GenericArray, typenum::U32};
 
 pub struct Cpa<N>(PhantomData<N>)
 where
-    N: Packable;
+    N: PolySize;
 
 #[derive(Clone)]
 pub struct PublicKeyCpa<N>
 where
-    N: Packable,
+    N: PolySize,
 {
     pk: PublicKey<N>,
     parameter: Parameter<N>,
@@ -23,7 +23,7 @@ where
 #[derive(Clone)]
 pub struct SecretKeyCpa<N>
 where
-    N: Packable,
+    N: PolySize,
 {
     sk: SecretKey<N>,
 }
@@ -31,7 +31,7 @@ where
 #[derive(Clone)]
 pub struct CipherTextCpa<N>
 where
-    N: Packable,
+    N: PolySize,
 {
     pk: PublicKey<N>,
     ct: GenericArray<u8, N::CompressedLength>,
@@ -39,7 +39,7 @@ where
 
 impl<N> Cpa<N>
 where
-    N: Packable,
+    N: PolySize,
     Parameter<N>: Pke<
         Seed = U32,
         GenerationSeed = U32,
@@ -91,7 +91,7 @@ where
 mod codable {
     #[rustfmt::skip]
     use super::{
-        Codable, Packable, Parameter, Pke,
+        Codable, PolySize, Parameter, Pke,
         PublicKeyCpa, PublicKey,
         SecretKeyCpa, SecretKey,
         CipherTextCpa,
@@ -103,7 +103,7 @@ mod codable {
 
     impl<N> Codable for PublicKeyCpa<N>
     where
-        N: Packable,
+        N: PolySize,
         Parameter<N>: Pke<Seed = U32>,
         PublicKey<N>: Codable,
     {
@@ -131,7 +131,7 @@ mod codable {
 
     impl<N> Codable for SecretKeyCpa<N>
     where
-        N: Packable,
+        N: PolySize,
         SecretKey<N>: Codable,
     {
         const SIZE: usize = SecretKey::<N>::SIZE;
@@ -147,7 +147,7 @@ mod codable {
 
     impl<N> Codable for CipherTextCpa<N>
     where
-        N: Packable,
+        N: PolySize,
         PublicKey<N>: Codable,
     {
         const SIZE: usize = PublicKey::<N>::SIZE + N::CompressedLength::USIZE;
