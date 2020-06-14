@@ -1,8 +1,5 @@
-use crate::{
-    cpa::Cpa,
-    cca::Cca,
-    pke::{Pke, Parameter},
-};
+use crate::{Cpa, Cca, Pke, Parameter};
+use pq_kem::Kem;
 use rac::generic_array::{GenericArray, sequence::GenericSequence, typenum::U1024};
 use wasm_bindgen_test::*;
 
@@ -20,17 +17,21 @@ fn pke() {
 #[wasm_bindgen_test]
 #[test]
 fn cpa() {
-    let (pk_a, sk_a) = Cpa::<U1024>::generate(&GenericArray::generate(|_| rand::random()));
-    let (ct, key_b) = Cpa::<U1024>::encapsulate(&pk_a, &GenericArray::generate(|_| rand::random()));
-    let key_a = Cpa::<U1024>::decapsulate(&sk_a, &ct);
-    assert_eq!(key_a, key_b);
+    kem::<Cpa<U1024>>()
 }
 
 #[wasm_bindgen_test]
 #[test]
 fn cca() {
-    let (pk_a, sk_a) = Cca::<U1024>::generate(&GenericArray::generate(|_| rand::random()));
-    let (ct, key_b) = Cca::<U1024>::encapsulate(&pk_a, &GenericArray::generate(|_| rand::random()));
-    let key_a = Cca::<U1024>::decapsulate(&sk_a, &ct);
+    kem::<Cca<U1024>>()
+}
+
+fn kem<K>()
+where
+    K: Kem,
+{
+    let (pk, sk) = K::generate_pair(&GenericArray::generate(|_| rand::random()));
+    let (ct, key_b) = K::encapsulate(&GenericArray::generate(|_| rand::random()), &pk);
+    let key_a = K::decapsulate(&sk, &ct);
     assert_eq!(key_a, key_b);
 }

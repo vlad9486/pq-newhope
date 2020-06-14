@@ -3,10 +3,9 @@ use criterion_cycles_per_byte::CyclesPerByte;
 
 use pq_newhope::{
     poly::{Poly, Ntt, FromSeed},
-    pke::{Pke, Parameter},
-    cpa::Cpa,
-    cca::Cca,
+    Pke, Parameter, Cpa, Cca,
 };
+use pq_kem::Kem;
 use rac::generic_array::{
     GenericArray,
     sequence::GenericSequence,
@@ -35,18 +34,28 @@ fn pke(
     black_box(plain_b);
 }
 
+fn kem<K>(
+    g: &GenericArray<u8, K::PairSeedLength>,
+    e: &GenericArray<u8, K::EncapsulationSeedLength>,
+) -> (
+    GenericArray<u8, K::SharedSecretLength>,
+    GenericArray<u8, K::SharedSecretLength>,
+)
+where
+    K: Kem,
+{
+    let (pk_a, sk_a) = K::generate_pair(g);
+    let (ct, key_b) = K::encapsulate(e, &pk_a);
+    let key_a = K::decapsulate(&sk_a, &ct);
+    (key_a, key_b)
+}
+
 fn cpa(g: &GenericArray<u8, U32>, e: &GenericArray<u8, U32>) {
-    let (pk_a, sk_a) = Cpa::<U1024>::generate(g);
-    let (ct, key_b) = Cpa::<U1024>::encapsulate(&pk_a, e);
-    let key_a = Cpa::<U1024>::decapsulate(&sk_a, &ct);
-    black_box((key_a, key_b));
+    black_box(kem::<Cpa<U1024>>(g, e));
 }
 
 fn cca(g: &GenericArray<u8, U64>, e: &GenericArray<u8, U32>) {
-    let (pk_a, sk_a) = Cca::<U1024>::generate(g);
-    let (ct, key_b) = Cca::<U1024>::encapsulate(&pk_a, e);
-    let key_a = Cca::<U1024>::decapsulate(&sk_a, &ct);
-    black_box((key_a, key_b));
+    black_box(kem::<Cca<U1024>>(g, e));
 }
 
 fn bench(c: &mut Criterion<CyclesPerByte>) {

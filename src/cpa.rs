@@ -4,7 +4,11 @@ use super::{
     pke::{Pke, PublicKey, SecretKey, Parameter},
 };
 use core::marker::PhantomData;
-use rac::generic_array::{GenericArray, typenum::U32};
+use rac::{
+    LineValid,
+    generic_array::{GenericArray, typenum::U32},
+};
+use pq_kem::Kem;
 
 pub struct Cpa<N>(PhantomData<N>)
 where
@@ -37,9 +41,12 @@ where
     ct: GenericArray<u8, N::CompressedLength>,
 }
 
-impl<N> Cpa<N>
+impl<N> Kem for Cpa<N>
 where
     N: PolySize,
+    PublicKeyCpa<N>: LineValid,
+    SecretKeyCpa<N>: LineValid,
+    CipherTextCpa<N>: LineValid,
     Parameter<N>: Pke<
         Seed = U32,
         GenerationSeed = U32,
@@ -49,7 +56,16 @@ where
         SecretKey = SecretKey<N>,
     >,
 {
-    pub fn generate(seed: &GenericArray<u8, U32>) -> (PublicKeyCpa<N>, SecretKeyCpa<N>) {
+    type PublicKey = PublicKeyCpa<N>;
+    type SecretKey = SecretKeyCpa<N>;
+    type CipherText = CipherTextCpa<N>;
+    type PairSeedLength = U32;
+    type EncapsulationSeedLength = U32;
+    type SharedSecretLength = U32;
+
+    fn generate_pair(
+        seed: &GenericArray<u8, Self::PairSeedLength>,
+    ) -> (Self::PublicKey, Self::SecretKey) {
         let (public_seed, noise_seed) = hash::expand(seed, 1);
 
         let parameter = Parameter::new(&public_seed);
@@ -64,10 +80,10 @@ where
         )
     }
 
-    pub fn encapsulate(
-        public_key: &PublicKeyCpa<N>,
-        seed: &GenericArray<u8, U32>,
-    ) -> (CipherTextCpa<N>, GenericArray<u8, U32>) {
+    fn encapsulate(
+        seed: &GenericArray<u8, Self::EncapsulationSeedLength>,
+        public_key: &Self::PublicKey,
+    ) -> (Self::CipherText, GenericArray<u8, Self::SharedSecretLength>) {
         let (message, noise_seed) = hash::expand(seed, 2);
         let (pk, cipher) = public_key
             .parameter
@@ -77,10 +93,10 @@ where
         (CipherTextCpa { pk: pk, ct: cipher }, shared_secret)
     }
 
-    pub fn decapsulate(
-        secret_key: &SecretKeyCpa<N>,
-        cipher_text: &CipherTextCpa<N>,
-    ) -> GenericArray<u8, U32> {
+    fn decapsulate(
+        secret_key: &Self::SecretKey,
+        cipher_text: &Self::CipherText,
+    ) -> GenericArray<u8, Self::SharedSecretLength> {
         let message = Parameter::decrypt(&cipher_text.pk, &secret_key.sk, &cipher_text.ct);
         let mut shared_secret = GenericArray::default();
         hash::shake256(message.as_ref(), shared_secret.as_mut());
@@ -97,12 +113,8 @@ mod codable {
         CipherTextCpa,
     };
     use rac::{
-        LineValid,
-        Concat,
-        generic_array::{
-            GenericArray,
-            typenum::U32,
-        },
+        LineValid, Concat,
+        generic_array::{GenericArray, typenum::U32},
     };
 
     type PkBytes<N> = Concat<PublicKey<N>, GenericArray<u8, <Parameter<N> as Pke>::Seed>>;
@@ -118,14 +130,11 @@ mod codable {
         type Length = <PkBytes<N> as LineValid>::Length;
 
         fn try_clone_array(a: &GenericArray<u8, Self::Length>) -> Result<Self, ()> {
-            PkBytes::try_clone_array(a)
-                .map(|Concat(pk, seed)| {
-                    PublicKeyCpa {
-                        pk: pk,
-                        parameter: Parameter::new(&seed),
-                        seed: seed,
-                    }
-                })
+            PkBytes::try_clone_array(a).map(|Concat(pk, seed)| PublicKeyCpa {
+                pk: pk,
+                parameter: Parameter::new(&seed),
+                seed: seed,
+            })
         }
 
         fn clone_line(&self) -> GenericArray<u8, Self::Length> {
@@ -139,13 +148,9 @@ mod codable {
         SecretKey<N>: LineValid,
     {
         type Length = <SecretKey<N> as LineValid>::Length;
-        
+
         fn try_clone_array(a: &GenericArray<u8, Self::Length>) -> Result<Self, ()> {
-            SecretKey::try_clone_array(a).map(|sk| {
-                SecretKeyCpa {
-                    sk: sk,
-                }
-            })
+            SecretKey::try_clone_array(a).map(|sk| SecretKeyCpa { sk: sk })
         }
 
         fn clone_line(&self) -> GenericArray<u8, Self::Length> {
@@ -162,12 +167,7 @@ mod codable {
         type Length = <CtBytes<N> as LineValid>::Length;
 
         fn try_clone_array(a: &GenericArray<u8, Self::Length>) -> Result<Self, ()> {
-            CtBytes::try_clone_array(a).map(|Concat(pk, ct)| {
-                CipherTextCpa {
-                    pk: pk,
-                    ct: ct,
-                }
-            })
+            CtBytes::try_clone_array(a).map(|Concat(pk, ct)| CipherTextCpa { pk: pk, ct: ct })
         }
 
         fn clone_line(&self) -> GenericArray<u8, Self::Length> {
