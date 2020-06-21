@@ -3,9 +3,10 @@ use criterion_cycles_per_byte::CyclesPerByte;
 
 use pq_newhope::{
     poly::{Poly, Ntt, FromSeed},
-    Pke, Parameter, Cpa, Cca,
+    Pke, Parameter, Cpa, Cca, h,
 };
 use pq_kem::Kem;
+use sha3::Shake256;
 use rac::generic_array::{
     GenericArray,
     sequence::GenericSequence,
@@ -42,11 +43,12 @@ fn kem<K>(
     GenericArray<u8, K::SharedSecretLength>,
 )
 where
-    K: Kem,
+    K: Kem<Shake256>,
 {
     let (pk_a, sk_a) = K::generate_pair(g);
-    let (ct, key_b) = K::encapsulate(e, &pk_a);
-    let key_a = K::decapsulate(&sk_a, &ct);
+    let pk_hash = h::<Shake256, _, _>(&pk_a);
+    let (ct, key_b) = K::encapsulate(e, &pk_a, &pk_hash);
+    let key_a = K::decapsulate(&sk_a, &pk_hash, &ct);
     (key_a, key_b)
 }
 

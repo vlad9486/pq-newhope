@@ -8,6 +8,7 @@ use rac::{
     Concat, LineValid,
     generic_array::{GenericArray, typenum::U32},
 };
+use sha3::digest::{Update, ExtendableOutput};
 use pq_kem::Kem;
 
 pub struct Cpa<N>(PhantomData<N>)
@@ -41,8 +42,9 @@ where
     ct: GenericArray<u8, N::CompressedLength>,
 }
 
-impl<N> Kem for Cpa<N>
+impl<N, D> Kem<D> for Cpa<N>
 where
+    D: Default + Update + ExtendableOutput,
     N: PolySize,
     PublicKeyCpa<N>: LineValid,
     SecretKeyCpa<N>: LineValid,
@@ -60,13 +62,14 @@ where
     type SecretKey = SecretKeyCpa<N>;
     type CipherText = CipherTextCpa<N>;
     type PairSeedLength = U32;
+    type PublicKeyHashLength = U32;
     type EncapsulationSeedLength = U32;
     type SharedSecretLength = U32;
 
     fn generate_pair(
         seed: &GenericArray<u8, Self::PairSeedLength>,
     ) -> (Self::PublicKey, Self::SecretKey) {
-        let Concat(public_seed, noise_seed) = hash::h(&Concat(hash::B(1), seed.clone()));
+        let Concat(public_seed, noise_seed) = hash::h::<D, _, _>(&Concat(hash::B(1), seed.clone()));
 
         let parameter = Parameter::new(&public_seed);
         let (pk, sk) = parameter.generate(&noise_seed);
@@ -83,20 +86,24 @@ where
     fn encapsulate(
         seed: &GenericArray<u8, Self::EncapsulationSeedLength>,
         public_key: &Self::PublicKey,
+        public_key_hash: &GenericArray<u8, Self::PublicKeyHashLength>,
     ) -> (Self::CipherText, GenericArray<u8, Self::SharedSecretLength>) {
-        let Concat(message, noise_seed) = hash::h(&Concat(hash::B(2), seed.clone()));
+        let _ = public_key_hash;
+        let Concat(message, noise_seed) = hash::h::<D, _, _>(&Concat(hash::B(2), seed.clone()));
         let (pk, cipher) = public_key
             .parameter
             .encrypt(&noise_seed, &public_key.pk, &message);
-        (CipherTextCpa { pk: pk, ct: cipher }, hash::h(&message))
+        (CipherTextCpa { pk: pk, ct: cipher }, hash::h::<D, _, _>(&message))
     }
 
     fn decapsulate(
         secret_key: &Self::SecretKey,
+        public_key_hash: &GenericArray<u8, Self::PublicKeyHashLength>,
         cipher_text: &Self::CipherText,
     ) -> GenericArray<u8, Self::SharedSecretLength> {
+        let _ = public_key_hash;
         let message = Parameter::decrypt(&cipher_text.pk, &secret_key.sk, &cipher_text.ct);
-        hash::h(&message)
+        hash::h::<D, _, _>(&message)
     }
 }
 

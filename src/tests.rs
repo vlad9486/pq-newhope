@@ -1,5 +1,6 @@
-use crate::{Cpa, Cca, Pke, Parameter};
+use crate::{Cpa, Cca, Pke, Parameter, h};
 use pq_kem::Kem;
+use sha3::Shake256;
 use rac::generic_array::{GenericArray, sequence::GenericSequence, typenum::U1024};
 use wasm_bindgen_test::*;
 
@@ -28,10 +29,11 @@ fn cca() {
 
 fn kem<K>()
 where
-    K: Kem,
+    K: Kem<Shake256>,
 {
     let (pk, sk) = K::generate_pair(&GenericArray::generate(|_| rand::random()));
-    let (ct, key_b) = K::encapsulate(&GenericArray::generate(|_| rand::random()), &pk);
-    let key_a = K::decapsulate(&sk, &ct);
+    let pk_hash = h::<Shake256, _, _>(&pk);
+    let (ct, key_b) = K::encapsulate(&GenericArray::generate(|_| rand::random()), &pk, &pk_hash);
+    let key_a = K::decapsulate(&sk, &pk_hash, &ct);
     assert_eq!(key_a, key_b);
 }

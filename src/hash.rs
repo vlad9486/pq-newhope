@@ -2,6 +2,7 @@ use rac::{
     Line, LineValid,
     generic_array::{GenericArray, typenum::U1},
 };
+use sha3::digest::{Update, ExtendableOutput};
 
 pub struct B(pub u8);
 
@@ -17,18 +18,16 @@ impl LineValid for B {
     }
 }
 
-pub fn h<I, O>(input: &I) -> O
+pub fn h<D, I, O>(input: &I) -> O
 where
+    D: Default + Update + ExtendableOutput,
     I: LineValid,
     O: Line,
 {
-    use sha3::{
-        Shake256,
-        digest::{Update, ExtendableOutput, XofReader},
-    };
+    use sha3::digest::XofReader;
 
     let mut buffer = GenericArray::default();
-    Shake256::default()
+    D::default()
         .chain(input.clone_line())
         .finalize_xof()
         .read(buffer.as_mut());

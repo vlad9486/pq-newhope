@@ -6,6 +6,7 @@ pub use rac::generic_array;
 extern crate std;
 
 mod hash;
+pub use self::hash::h;
 
 pub mod poly;
 
