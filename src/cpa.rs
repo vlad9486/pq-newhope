@@ -5,7 +5,7 @@ use super::{
 };
 use core::marker::PhantomData;
 use rac::{
-    LineValid,
+    Concat, LineValid,
     generic_array::{GenericArray, typenum::U32},
 };
 use pq_kem::Kem;
@@ -66,7 +66,7 @@ where
     fn generate_pair(
         seed: &GenericArray<u8, Self::PairSeedLength>,
     ) -> (Self::PublicKey, Self::SecretKey) {
-        let (public_seed, noise_seed) = hash::expand(seed, 1);
+        let Concat(public_seed, noise_seed) = hash::h(&Concat(hash::B(1), seed.clone()));
 
         let parameter = Parameter::new(&public_seed);
         let (pk, sk) = parameter.generate(&noise_seed);
@@ -84,13 +84,11 @@ where
         seed: &GenericArray<u8, Self::EncapsulationSeedLength>,
         public_key: &Self::PublicKey,
     ) -> (Self::CipherText, GenericArray<u8, Self::SharedSecretLength>) {
-        let (message, noise_seed) = hash::expand(seed, 2);
+        let Concat(message, noise_seed) = hash::h(&Concat(hash::B(2), seed.clone()));
         let (pk, cipher) = public_key
             .parameter
             .encrypt(&noise_seed, &public_key.pk, &message);
-        let mut shared_secret = GenericArray::default();
-        hash::shake256(message.as_ref(), shared_secret.as_mut());
-        (CipherTextCpa { pk: pk, ct: cipher }, shared_secret)
+        (CipherTextCpa { pk: pk, ct: cipher }, hash::h(&message))
     }
 
     fn decapsulate(
@@ -98,9 +96,7 @@ where
         cipher_text: &Self::CipherText,
     ) -> GenericArray<u8, Self::SharedSecretLength> {
         let message = Parameter::decrypt(&cipher_text.pk, &secret_key.sk, &cipher_text.ct);
-        let mut shared_secret = GenericArray::default();
-        hash::shake256(message.as_ref(), shared_secret.as_mut());
-        shared_secret
+        hash::h(&message)
     }
 }
 

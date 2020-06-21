@@ -1,5 +1,4 @@
 use super::coefficient::{Coefficient, CoefficientRich};
-use crate::hash;
 use core::{
     marker::PhantomData,
     ops::{Mul, Div, Not},
@@ -295,6 +294,11 @@ where
     S: PolyState<Size = B0>,
 {
     fn random_small(seed: &GenericArray<u8, U32>, nonce: u8) -> Self {
+        use sha3::{
+            Shake256,
+            digest::{Update, ExtendableOutput, XofReader},
+        };
+
         let mut c = GenericArray::default();
 
         let mut ext_seed = [0; 34];
@@ -308,7 +312,10 @@ where
             let hw = |b: u8| -> i8 { (0..8).map(|i| ((b >> i) & 1) as i8).sum() };
 
             let mut buffer = [0; Self::BLOCK_SIZE * 2];
-            hash::shake256(ext_seed.as_ref(), buffer.as_mut());
+            Shake256::default()
+                .chain(&ext_seed[..])
+                .finalize_xof()
+                .read(buffer.as_mut());
             for j in 0..Self::BLOCK_SIZE {
                 c[Self::BLOCK_SIZE * i + j] =
                     Coefficient::small(hw(buffer[2 * j]) - hw(buffer[2 * j + 1]));

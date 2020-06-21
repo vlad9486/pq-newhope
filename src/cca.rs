@@ -5,7 +5,7 @@ use super::{
 };
 use core::marker::PhantomData;
 use rac::{
-    LineValid,
+    LineValid, Line, Concat,
     generic_array::{
         GenericArray,
         typenum::{U32, U64},
@@ -48,12 +48,15 @@ where
     check: GenericArray<u8, U32>,
 }
 
+type B = Concat<Concat<GenericArray<u8, U32>, GenericArray<u8, U32>>, GenericArray<u8, U32>>;
+
 impl<N> Kem for Cca<N>
 where
     N: PolySize,
     PublicKeyCca<N>: Clone + LineValid,
     SecretKeyCca<N>: LineValid,
-    CipherTextCca<N>: LineValid,
+    CipherTextCca<N>: Clone + LineValid,
+    Concat<GenericArray<u8, U32>, CipherTextCca<N>>: LineValid,
     Parameter<N>: Pke<
         Seed = U32,
         GenerationSeed = U32,
@@ -73,11 +76,8 @@ where
     fn generate_pair(
         seed: &GenericArray<u8, Self::PairSeedLength>,
     ) -> (Self::PublicKey, Self::SecretKey) {
-        let mut reject = GenericArray::default();
-        reject.clone_from_slice(seed[..32].as_ref());
-        let mut cpa_seed = GenericArray::default();
-        cpa_seed.clone_from_slice(seed[32..].as_ref());
-        let (parameter_seed, pk_seed) = hash::expand(&cpa_seed, 1);
+        let Concat(reject, cpa_seed) = Concat::<_, GenericArray<u8, U32>>::clone_array(seed);
+        let Concat(parameter_seed, pk_seed) = hash::h(&Concat(hash::B(1), cpa_seed));
         let parameter = Parameter::new(&parameter_seed);
         let (pk, sk) = parameter.generate(&pk_seed);
         let public_key = PublicKeyCca {
@@ -85,15 +85,12 @@ where
             parameter: parameter,
             seed: parameter_seed,
         };
-        let mut pk_hash = GenericArray::default();
-        let pk_bytes = public_key.clone_line();
-        hash::shake256(pk_bytes.as_ref(), pk_hash.as_mut());
         (
             public_key.clone(),
             SecretKeyCca {
                 sk: sk,
-                pk: public_key,
-                pk_hash: pk_hash,
+                pk: public_key.clone(),
+                pk_hash: hash::h(&public_key),
                 reject: reject,
             },
         )
@@ -103,41 +100,18 @@ where
         seed: &GenericArray<u8, Self::EncapsulationSeedLength>,
         public_key: &Self::PublicKey,
     ) -> (Self::CipherText, GenericArray<u8, Self::SharedSecretLength>) {
-        let mut ext_seed = [0; 0x21];
-        ext_seed[0x00] = 0x04;
-        ext_seed[0x01..0x21].clone_from_slice(seed.as_ref());
-
-        let mut new_seed = [0; 0x41];
-        new_seed[0x00] = 0x08;
-        hash::shake256(ext_seed.as_ref(), &mut new_seed[0x01..0x21]);
-
-        let public_key_bytes = public_key.clone_line();
-        hash::shake256(public_key_bytes.as_ref(), new_seed[0x21..0x41].as_mut());
-
-        let mut buffer = [0; 0x60];
-        hash::shake256(new_seed.as_ref(), buffer.as_mut());
-
-        let mut encryption_seed = GenericArray::default();
-        encryption_seed.clone_from_slice(buffer[0x20..0x40].as_ref());
-
-        let mut message = GenericArray::default();
-        message.clone_from_slice(new_seed[0x01..0x21].as_ref());
-        let (pk_b, ct) = public_key
-            .parameter
-            .encrypt(&encryption_seed, &public_key.pk, &message);
-
-        let mut hash = GenericArray::default();
-        hash.clone_from_slice(buffer[0x40..].as_ref());
+        let message: GenericArray<u8, U32> = hash::h(&Concat(hash::B(0x04), seed.clone()));
+        let Concat(Concat(b0, b1), b2) = hash::h::<Concat<_, GenericArray<u8, U32>>, B>(&Concat(
+            Concat(hash::B(0x08), message.clone()),
+            hash::h(public_key),
+        ));
+        let (pk_b, ct) = public_key.parameter.encrypt(&b1, &public_key.pk, &message);
         let cipher_text = CipherTextCca {
             pk: pk_b,
             ct: ct,
-            check: hash,
+            check: b2,
         };
-        let cipher_text_bytes = cipher_text.clone_line();
-        hash::shake256(cipher_text_bytes.as_ref(), buffer[0x20..0x40].as_mut());
-
-        let mut shared_secret = GenericArray::default();
-        hash::shake256(buffer[0x00..0x40].as_ref(), shared_secret.as_mut());
+        let shared_secret = hash::h(&Concat(b0, cipher_text.clone()));
         (cipher_text, shared_secret)
     }
 
@@ -157,46 +131,30 @@ where
             }
         }
 
-        let message = Parameter::decrypt(&cipher_text.pk, &secret_key.sk, &cipher_text.ct);
-        let mut new_seed = [0; 0x41];
-        new_seed[0x00] = 0x08;
-        new_seed[0x01..0x21].clone_from_slice(message.as_ref());
-        new_seed[0x21..0x41].clone_from_slice(secret_key.pk_hash.as_ref());
+        let message: GenericArray<u8, U32> =
+            Parameter::decrypt(&cipher_text.pk, &secret_key.sk, &cipher_text.ct);
+        let Concat(Concat(mut b0, b1), b2) = hash::h::<Concat<_, GenericArray<u8, U32>>, B>(
+            &Concat(Concat(hash::B(0x08), message.clone()), secret_key.pk_hash),
+        );
 
-        let mut buffer = [0; 0x60];
-        hash::shake256(new_seed.as_ref(), buffer.as_mut());
-
-        let mut encryption_seed = GenericArray::default();
-        encryption_seed.clone_from_slice(buffer[0x20..0x40].as_ref());
-
-        let (pk_b_cmp, ct_cmp) =
-            secret_key
-                .pk
-                .parameter
-                .encrypt(&encryption_seed, &secret_key.pk.pk, &message);
-
-        let mut hash = GenericArray::default();
-        hash.clone_from_slice(buffer[0x40..].as_ref());
+        let (pk_b_cmp, ct_cmp) = secret_key
+            .pk
+            .parameter
+            .encrypt(&b1, &secret_key.pk.pk, &message);
         let cipher_text_cmp = CipherTextCca {
             pk: pk_b_cmp,
             ct: ct_cmp,
-            check: hash,
+            check: b2,
         };
-
         let cipher_text_bytes = cipher_text.clone_line();
         let cipher_text_cmp_bytes = cipher_text_cmp.clone_line();
         let fail = c_cmp(cipher_text_bytes.as_ref(), cipher_text_cmp_bytes.as_ref());
-        let fail = if fail == 0 { 0 } else { 0xff };
-        hash::shake256(cipher_text_bytes.as_ref(), buffer[0x20..0x40].as_mut());
         c_mov(
-            buffer[0x00..0x20].as_mut(),
+            b0.as_mut(),
             secret_key.reject.as_ref(),
-            fail,
+            if fail == 0 { 0 } else { 0xff },
         );
-
-        let mut shared_secret = GenericArray::default();
-        hash::shake256(buffer[0x00..0x40].as_ref(), shared_secret.as_mut());
-        shared_secret
+        hash::h(&Concat(b0, cipher_text.clone()))
     }
 }
 

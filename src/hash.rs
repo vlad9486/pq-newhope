@@ -1,26 +1,37 @@
-use rac::generic_array::{GenericArray, typenum::U32};
+use rac::{
+    Line, LineValid,
+    generic_array::{GenericArray, typenum::U1},
+};
 
-pub fn shake256(data: &[u8], buffer: &mut [u8]) {
+pub struct B(pub u8);
+
+impl LineValid for B {
+    type Length = U1;
+
+    fn try_clone_array(a: &GenericArray<u8, Self::Length>) -> Result<Self, ()> {
+        Ok(B(a[0]))
+    }
+
+    fn clone_line(&self) -> GenericArray<u8, Self::Length> {
+        GenericArray::from([self.0])
+    }
+}
+
+pub fn h<I, O>(input: &I) -> O
+where
+    I: LineValid,
+    O: Line,
+{
     use sha3::{
         Shake256,
         digest::{Update, ExtendableOutput, XofReader},
     };
 
-    Shake256::default().chain(data).finalize_xof().read(buffer)
-}
+    let mut buffer = GenericArray::default();
+    Shake256::default()
+        .chain(input.clone_line())
+        .finalize_xof()
+        .read(buffer.as_mut());
 
-pub fn expand(
-    seed: &GenericArray<u8, U32>,
-    nonce: u8,
-) -> (GenericArray<u8, U32>, GenericArray<u8, U32>) {
-    let mut data = [0; 0x21];
-    data[0] = nonce;
-    data[0x01..0x21].clone_from_slice(seed.as_ref());
-    let mut buffer = [0; 0x40];
-    shake256(data.as_ref(), buffer.as_mut());
-    let mut public_seed = GenericArray::default();
-    public_seed.clone_from_slice(&buffer[..0x20]);
-    let mut noise_seed = GenericArray::default();
-    noise_seed.clone_from_slice(&buffer[0x20..]);
-    (public_seed, noise_seed)
+    Line::clone_array(&buffer)
 }
